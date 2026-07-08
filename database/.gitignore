@@ -1,0 +1,36 @@
+# Dependencias (No se suben porque pesan muchísimo y se instalan con composer/npm)
+/node_modules
+/vendor
+
+# Archivos compilados de Vue/Vite
+/public/build
+/public/hot
+/public/storage
+
+# Variables de entorno y contraseñas (¡CRÍTICO NO SUBIRLOS!)
+.env
+.env.backup
+.env.testing
+.env.*.local
+/storage/*.key
+auth.json
+
+# Base de datos local SQLite
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+/database/*.sqlite
+/database/*.sqlite3
+
+# Caché, Sesiones y Logs de Laravel (Se generan solos en cada servidor)
+/storage/app/*
+!/storage/app/public
+!/storage/app/.gitignore
+/storage/framework/cache/data/*
+!/storage/framework/cache/data/.gitignore
+/storage/framework/sessions/*
+!/storage/framework/sessions/.gitignore
+/storage/framework/testing/*
+!/storage/framework/testing/.gitignore
+/Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
