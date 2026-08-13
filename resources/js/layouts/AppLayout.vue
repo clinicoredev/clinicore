@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { usePage, Link } from '@inertiajs/vue3';
+import { usePage, Link, router } from '@inertiajs/vue3';
 import { 
     LayoutDashboard, CalendarDays, Users, LogOut, 
     Activity, CalendarClock, Layers, Building2, ShieldAlert,
-    Menu, X // Añadimos los iconos para el menú móvil
+    Menu, X, Bell // Añadimos los iconos para el menú móvil
 } from '@lucide/vue';
 
 const page = usePage();
@@ -12,6 +12,9 @@ const user = page.props.auth?.user;
 
 // Estado reactivo para controlar el menú en pantallas pequeñas
 const menuAbierto = ref(false);
+
+// Estado para controlar si el desplegable de notificaciones está abierto
+const mostrarNotificaciones = ref(false);
 
 const menuNavegacion = computed(() => {
     if (user?.es_superadmin) {
@@ -30,6 +33,15 @@ const menuNavegacion = computed(() => {
         { name: 'Permisos y Ausencias', href: '/ausencias', icon: CalendarClock },
     ];
 });
+
+const marcarLeidas = () => {
+    router.post('/notificaciones/marcar-leidas', {}, {
+        preserveScroll: true,
+        onSuccess: () => {
+            mostrarNotificaciones.value = false; // Cierra el cajoncito al terminar
+        }
+    });
+};
 </script>
 
 <template>
@@ -113,12 +125,56 @@ const menuNavegacion = computed(() => {
                         <slot name="header">Área Clínica</slot>
                     </h1>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
+                
+                <!-- DENTRO DEL HEADER, A LA DERECHA -->
+                <div class="flex items-center gap-4 shrink-0">
+                    
+                    <!-- SISTEMA DE NOTIFICACIONES -->
+                    <div class="relative">
+                        <button @click="mostrarNotificaciones = !mostrarNotificaciones" class="relative p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors">
+                            <Bell class="w-5 h-5" />
+                            <!-- Globo rojo del contador (USANDO ? PARA EVITAR CRASHES) -->
+                            <span v-if="($page.props.auth?.notificaciones_count || 0) > 0" class="absolute top-1.5 right-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-zinc-900">
+                                {{ $page.props.auth.notificaciones_count }}
+                            </span>
+                        </button>
+
+                        <!-- DESPLEGABLE DE NOTIFICACIONES -->
+                        <div v-if="mostrarNotificaciones" class="absolute right-0 mt-2 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                            <div class="p-3 border-b border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
+                                <span class="text-sm font-bold text-white">Notificaciones</span>
+                                <button 
+                                    v-if="($page.props.auth?.notificaciones_count || 0) > 0" 
+                                    @click="marcarLeidas"
+                                    class="text-[10px] text-emerald-400 hover:text-emerald-300 uppercase font-bold tracking-wider cursor-pointer"
+                                >
+                                    Marcar leídas
+                                </button>
+                            </div>
+                            
+                            <div class="max-h-80 overflow-y-auto">
+                                <!-- USANDO ? PARA EVITAR CRASHES SI EL ARRAY NO EXISTE -->
+                                <div v-if="!$page.props.auth?.notificaciones || $page.props.auth.notificaciones.length === 0" class="p-6 text-center text-xs text-zinc-500 italic">
+                                    No tienes notificaciones nuevas.
+                                </div>
+                                
+                                <div v-else v-for="notificacion in $page.props.auth.notificaciones" :key="notificacion.id" class="p-3 border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors flex gap-3">
+                                    <div class="mt-0.5 shrink-0">
+                                        <div class="w-2 h-2 rounded-full mt-1.5" :class="notificacion.data?.estado === 'aprobada' ? 'bg-emerald-500' : 'bg-rose-500'"></div>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs font-bold text-white">{{ notificacion.data?.titulo }}</p>
+                                        <p class="text-[11px] text-zinc-400 mt-0.5 leading-tight">{{ notificacion.data?.mensaje }}</p>
+                                        <p class="text-[9px] text-zinc-600 font-mono mt-1">{{ notificacion.data?.fecha }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tu badge de SaaS v1.0 -->
                     <span class="hidden sm:inline-block px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         SaaS v1.0
-                    </span>
-                    <span class="sm:hidden px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        v1.0
                     </span>
                 </div>
             </header>

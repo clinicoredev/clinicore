@@ -84,7 +84,6 @@ const usuarioEditando = ref(null);
 const formNewUser = useForm({
     name: '',
     email: '',
-    password: '',
     especialidad_id: '',
     role: 'Facultativo'
 });
@@ -279,10 +278,6 @@ const eliminarUsuario = (id, nombre) => {
                         <div>
                             <input v-model="formNewUser.email" required type="email" placeholder="Email" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-sm focus:border-indigo-500 focus:outline-none" />
                             <span v-if="formNewUser.errors.email" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.email }}</span>
-                        </div>
-                        <div>
-                            <input v-model="formNewUser.password" required type="password" placeholder="Contraseña segura (mín. 8 caracteres)" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-sm focus:border-indigo-500 focus:outline-none" />
-                            <span v-if="formNewUser.errors.password" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.password }}</span>
                         </div>
                         <div class="flex flex-col">
                             <div class="flex gap-2">

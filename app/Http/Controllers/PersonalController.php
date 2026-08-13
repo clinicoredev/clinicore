@@ -54,27 +54,33 @@ class PersonalController extends Controller
         $jefe = $request->user();
         $especialidad = $jefe->especialidad;
 
+        // Comprobación de límites del SaaS
         if (User::where('especialidad_id', $jefe->especialidad_id)->count() >= $especialidad->limite_usuarios) {
             return back()->withErrors(['limite' => 'Plan al límite de capacidad.']);
         }
 
+        // Ya NO validamos la contraseña
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'rol' => ['required', Rule::in(['Jefe de Servicio', 'Facultativo'])],
-            'password' => ['required', 'string', 'min:8'],
+            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Facultativo'])],
         ]);
 
         $nuevoMedico = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
+            // Asignamos una contraseña irrompible y aleatoria
+            'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(32)),
             'especialidad_id' => $jefe->especialidad_id,
-            'calendar_token' => Str::random(40),
+            'calendar_token' => \Illuminate\Support\Str::random(40),
         ]);
 
         $nuevoMedico->assignRole($validated['rol']);
-        return back();
+
+        // Disparamos el correo con el enlace firmado
+        \Illuminate\Support\Facades\Mail::to($nuevoMedico->email)->send(new \App\Mail\InvitacionSaaS($nuevoMedico));
+
+        return back()->with('success', 'Médico añadido correctamente. Se ha enviado un enlace de activación a su correo.');
     }
 
     // 1. MODIFICAR DATOS DE UN MÉDICO

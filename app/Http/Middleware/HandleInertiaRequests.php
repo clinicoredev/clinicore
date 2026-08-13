@@ -45,10 +45,19 @@ class HandleInertiaRequests extends Middleware
                     'es_superadmin' => $request->user()->hasRole('SuperAdmin'),
                     'es_jefe' => $request->user()->hasRole('Jefe de Servicio'),
                     
-                    // NUEVO: Nombres dinámicos extraídos de las relaciones
+                    // Nombres dinámicos extraídos de las relaciones
                     'especialidad' => $request->user()->especialidad?->nombre ?? 'Administración SaaS',
                     'hospital' => $request->user()->especialidad?->hospital?->nombre ?? 'Plataforma Central',
                 ] : null,
+                
+                // LAS NOTIFICACIONES VAN AQUÍ, AL MISMO NIVEL QUE 'user' e 'impersonated'
+                'notificaciones' => $request->user() 
+                    ? $request->user()->unreadNotifications()->take(5)->get() 
+                    : [],
+                'notificaciones_count' => $request->user() 
+                    ? $request->user()->unreadNotifications()->count() 
+                    : 0,
+                    
                 'impersonated' => session()->has('impersonated_by'),
             ],
             'flash' => [

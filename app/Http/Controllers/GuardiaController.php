@@ -117,28 +117,36 @@ class GuardiaController extends Controller
         return back();
     }
 
-    public function storeManual(Request $request)
+    public function guardarGuardiaManual(Request $request)
     {
-        $jefe = $request->user();
-        if (!$jefe->hasRole('Jefe de Servicio')) abort(403);
+        if (!$request->user()->hasRole('Jefe de Servicio')) abort(403);
 
-        $validated = $request->validate([
+        $request->validate([
             'user_id' => 'required|exists:users,id',
             'fecha' => 'required|date',
             'tipo' => 'required|in:diaria_17h,festivo_24h'
         ]);
 
+        $jefe = $request->user();
+
+        // REEMPLAZO AUTOMÁTICO: Limpiamos cualquier guardia previa en esta fecha exacta
+        // Esto previene duplicados y cumple el requerimiento de borrado destructivo previo
+        \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+            ->where('fecha', $request->fecha)
+            ->delete();
+
+        // Insertamos el nuevo registro manual blindado
         \App\Models\Guardia::create([
             'especialidad_id' => $jefe->especialidad_id,
-            'user_id' => $validated['user_id'],
-            'fecha' => $validated['fecha'],
-            'tipo' => $validated['tipo'],
-            'observaciones' => 'Asignación manual por Jefatura',
+            'user_id' => $request->user_id,
+            'fecha' => $request->fecha,
+            'tipo' => $request->tipo,
             'estado' => 'programada',
-            'is_manual' => true // <--- LA CHINCHETA SAGRADA
+            'is_manual' => true,
+            'observaciones' => 'Fijado manualmente desde panel'
         ]);
 
-        return back()->with('success', 'Guardia fijada manualmente. Ya puedes generar el resto del cuadrante.');
+        return back()->with('success', 'Guardia manual consolidada correctamente.');
     }
 
     // =========================================================================
@@ -154,21 +162,32 @@ class GuardiaController extends Controller
         $request->validate([
             'mes' => 'required|integer|between:1,12', 
             'anio' => 'required|integer', 
-            'medicos_incluidos' => 'nullable|array'
+            'medicos_incluidos' => 'nullable|array',
+            'respetar_salientes' => 'boolean',
+            'distancia_minima_dias' => 'nullable|integer|min:1|max:5',
+            'max_guardias_mes' => 'nullable|integer|min:0',
+            'max_findes_mes' => 'nullable|integer|min:0',
+            'usar_memoria_anual' => 'boolean'
         ]);
         
         $jefe = $request->user();
         $mes = $request->mes;
         $anio = $request->anio;
 
+        // Lectura de parámetros dinámicos con valores por defecto
+        $respetarSalientes = $request->boolean('respetar_salientes', true);
+        $distanciaMinimaDias = $request->input('distancia_minima_dias', 2);
+        $maxGuardiasMes = (int) $request->input('max_guardias_mes', 0);
+        $maxFindesMes = (int) $request->input('max_findes_mes', 0);
+        $usarMemoriaAnual = $request->boolean('usar_memoria_anual', true);
+
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        // 1. Cargamos médicos (EXCLUYENDO AL SUPERADMIN Y FILTRANDO POR EL CHECKBOX)
+        // 1. Cargamos médicos filtrados por el checklist
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
             ->whereDoesntHave('roles', function ($query) {
                 $query->where('name', 'SuperAdmin');
             })
-            // Filtramos por los IDs que vienen del formulario frontend
             ->when($request->has('medicos_incluidos'), function ($query) use ($request) {
                 $query->whereIn('id', $request->input('medicos_incluidos'));
             })
@@ -178,7 +197,7 @@ class GuardiaController extends Controller
             return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: Debes incluir al menos 2 médicos en el algoritmo.']);
         }
 
-        // 2. Cargamos bases de conocimiento externas (Ausencias inclusivas)
+        // 2. Cargamos ausencias y limitaciones
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
         $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
 
@@ -190,7 +209,7 @@ class GuardiaController extends Controller
 
         $limitaciones = LimitacionGuardia::where('especialidad_id', $jefe->especialidad_id)->get();
 
-        // 3. LECTURA DE ANCLAJES (Guardias puestas a mano por el Jefe este mes)
+        // 3. LECTURA DE GUARDIAS MANUALES
         $guardiasManuales = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
             ->where('is_manual', true)
@@ -198,7 +217,7 @@ class GuardiaController extends Controller
 
         $diasCubiertos = $guardiasManuales->pluck('fecha')->map(fn($f) => Carbon::parse($f)->format('Y-m-d'))->toArray();
 
-        // 4. ESTRUCTURA DE ESTADÍSTICAS Y FATIGA (Con Memoria Anual y Puntos de Esfuerzo)
+        // 4. ESTRUCTURA DE ESTADÍSTICAS Y FATIGA
         $stats = [];
         foreach ($medicos as $m) {
             $stats[$m->id] = [
@@ -206,33 +225,35 @@ class GuardiaController extends Controller
                 'findes_mes' => 0, 
                 'total_anual' => 0,
                 'findes_anual' => 0,
-                'puntos_esfuerzo' => 0, // 17h = 1pto | 24h = 2ptos
-                'historial_dias_semana' => [], // Registro para evitar que repitan el mismo día
-                'ultima_guardia_fecha' => null // Memoria en caliente para el descanso de 24h
+                'puntos_esfuerzo' => 0,
+                'historial_dias_semana' => [],
+                'ultima_guardia_fecha' => null
             ];
         }
 
-        // 4.5 CARGA DE LA MEMORIA HISTÓRICA (Todo lo trabajado este año ANTES de este mes)
-        $inicioAnio = Carbon::createFromDate($anio, 1, 1)->startOfDay();
-        $historico = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
-            ->whereBetween('fecha', [$inicioAnio, $inicioMes->copy()->subDay()->endOfDay()])
-            ->get();
+        // 4.5 MEMORIA HISTÓRICA ANUAL (Se activa o desactiva con el toggle del frontend)
+        if ($usarMemoriaAnual) {
+            $inicioAnio = Carbon::createFromDate($anio, 1, 1)->startOfDay();
+            $historico = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+                ->whereBetween('fecha', [$inicioAnio, $inicioMes->copy()->subDay()->endOfDay()])
+                ->get();
 
-        foreach ($historico as $h) {
-            if (isset($stats[$h->user_id])) {
-                $stats[$h->user_id]['total_anual']++;
-                if ($h->tipo === 'festivo_24h') {
-                    $stats[$h->user_id]['findes_anual']++;
-                    $stats[$h->user_id]['puntos_esfuerzo'] += 2; // Finde vale doble
-                } else {
-                    $stats[$h->user_id]['puntos_esfuerzo'] += 1; // Diaria vale normal
+            foreach ($historico as $h) {
+                if (isset($stats[$h->user_id])) {
+                    $stats[$h->user_id]['total_anual']++;
+                    if ($h->tipo === 'festivo_24h') {
+                        $stats[$h->user_id]['findes_anual']++;
+                        $stats[$h->user_id]['puntos_esfuerzo'] += 2;
+                    } else {
+                        $stats[$h->user_id]['puntos_esfuerzo'] += 1;
+                    }
                 }
             }
         }
 
-        // 5. INYECTAR EL CANSANCIO DE LAS GUARDIAS MANUALES DEL MES ACTUAL
+        // 5. INYECTAR GUARDIAS MANUALES DEL MES
         foreach ($guardiasManuales as $gm) {
-            if (!isset($stats[$gm->user_id])) continue; // Si es un médico que hemos excluido en el checkbox, lo ignoramos
+            if (!isset($stats[$gm->user_id])) continue;
 
             $f = Carbon::parse($gm->fecha);
             $stats[$gm->user_id]['total_mes']++;
@@ -249,7 +270,7 @@ class GuardiaController extends Controller
             }
         }
 
-        // 6. CLASIFICACIÓN DE DÍAS LIBRES (Saltándonos las chinchetas manuales)
+        // 6. DÍAS POR CUBRIR
         $diasFinde = []; $diasSemana = [];
         for ($d = 1; $d <= $diasDelMes; $d++) {
             $f = Carbon::createFromDate($anio, $mes, $d);
@@ -260,9 +281,22 @@ class GuardiaController extends Controller
 
         $guardiasAInsertar = [];
 
-        // FUNCIÓN EVALUADORA DE RESTRICCIONES DURAS (Filtro de exclusión)
-        $esElegible = function($medicoId, Carbon $fecha) use ($ausencias, $limitaciones, &$stats) {
-            // Regla 1: Vacaciones inclusivas (+ día de gracia post-vacacional)
+        // FUNCIÓN EVALUADORA DE RESTRICCIONES (CON FILTROS DINÁMICOS)
+        $esElegible = function($medicoId, Carbon $fecha) use (
+            $ausencias, $limitaciones, &$stats, 
+            $respetarSalientes, $distanciaMinimaDias, $maxGuardiasMes, $maxFindesMes
+        ) {
+            // Regla A: Tope Máximo de Guardias al mes
+            if ($maxGuardiasMes > 0 && $stats[$medicoId]['total_mes'] >= $maxGuardiasMes) {
+                return false;
+            }
+
+            // Regla B: Tope Máximo de Fines de Semana al mes
+            if ($maxFindesMes > 0 && $fecha->isWeekend() && $stats[$medicoId]['findes_mes'] >= $maxFindesMes) {
+                return false;
+            }
+
+            // Regla C: Ausencias / Vacaciones inclusivas (+ día post-vacacional)
             foreach ($ausencias as $a) {
                 if ($a->user_id == $medicoId) {
                     $inicio = Carbon::parse($a->fecha_inicio)->startOfDay();
@@ -273,12 +307,15 @@ class GuardiaController extends Controller
                 }
             }
 
-            // Regla 2: Descanso mínimo obligatorio (24h de separación)
-            if ($stats[$medicoId]['ultima_guardia_fecha'] !== null) {
-                if (abs($fecha->diffInDays($stats[$medicoId]['ultima_guardia_fecha'])) < 2) return false;
+            // Regla D: Respetar Salientes / Descanso mínimo parametrizado
+            if ($respetarSalientes && $stats[$medicoId]['ultima_guardia_fecha'] !== null) {
+                $diasDiferencia = abs($fecha->diffInDays($stats[$medicoId]['ultima_guardia_fecha']));
+                if ($diasDiferencia < $distanciaMinimaDias) {
+                    return false;
+                }
             }
 
-            // Regla 3: Vetos de agenda personales
+            // Regla E: Vetos de agenda personales
             foreach ($limitaciones as $l) {
                 if ($l->user_id == $medicoId) {
                     if ($l->tipo === 'dia_semana' && (int)$fecha->dayOfWeekIso === (int)$l->valor) return false;
@@ -286,29 +323,27 @@ class GuardiaController extends Controller
                 }
             }
 
-            // Regla 4: Variedad obligatoria (Máximo 2 guardias el mismo día de la semana, ej: no hacer 3 lunes)
+            // Regla F: Máximo 2 guardias el mismo día de la semana
             $vecesEsteDia = count(array_filter($stats[$medicoId]['historial_dias_semana'], fn($d) => $d === $fecha->dayOfWeekIso));
             if ($vecesEsteDia >= 2) return false;
 
             return true;
         };
 
-        // --- FASE 1: REPARTO DE FINES DE SEMANA (Prioridad Máxima) ---
+        // --- FASE 1: FINES DE SEMANA ---
         foreach ($diasFinde as $fecha) {
             $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fecha));
 
             if ($candidatos->isEmpty()) {
-                return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el fin de semana del " . $fecha->format('d/m/Y') . ". El equipo incumple descansos o límites."]);
+                return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el fin de semana del " . $fecha->format('d/m/Y') . ". Las restricciones de salientes o límites impiden asignar a cualquier médico libre."]);
             }
 
-            // LÓGICA DE EQUIDAD ANUAL Y DE PUNTOS PARA FINES DE SEMANA
             $elegido = $candidatos->sortBy(function($m) use ($stats, $fecha, $guardiasAInsertar) {
                 $cargaSemanal = collect($guardiasAInsertar)
                     ->where('user_id', $m->id)
                     ->where('fecha', '>=', $fecha->copy()->subDays(6)->format('Y-m-d'))
                     ->count();
 
-                // Multiplicadores: Quien tenga MENOS findes anuales y MENOS puntos de esfuerzo va primero
                 return ($stats[$m->id]['findes_anual'] * 1000) 
                      + ($stats[$m->id]['puntos_esfuerzo'] * 100) 
                      + ($cargaSemanal * 10) 
@@ -320,25 +355,23 @@ class GuardiaController extends Controller
                 'tipo' => 'festivo_24h', 'estado' => 'programada', 'is_manual' => false, 'observaciones' => 'IA', 'created_at' => now(), 'updated_at' => now()
             ];
 
-            // Actualizamos los marcadores en caliente
             $stats[$elegido->id]['findes_mes']++;
             $stats[$elegido->id]['findes_anual']++;
             $stats[$elegido->id]['total_mes']++;
             $stats[$elegido->id]['total_anual']++;
-            $stats[$elegido->id]['puntos_esfuerzo'] += 2; // +2 puntos por guardia de finde
+            $stats[$elegido->id]['puntos_esfuerzo'] += 2;
             $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
             $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
         }
 
-        // --- FASE 2: REPARTO ENTRE SEMANA (Turnos ordinarios de 17h) ---
+        // --- FASE 2: DÍAS DE DIARIO (17h) ---
         foreach ($diasSemana as $fecha) {
             $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fecha));
 
             if ($candidatos->isEmpty()) {
-                return back()->withErrors(['algoritmo' => "COLAPSO: Hueco irresoluble el " . $fecha->format('d/m/Y') . ". No hay facultativos elegibles."]);
+                return back()->withErrors(['algoritmo' => "COLAPSO: Hueco irresoluble el " . $fecha->format('d/m/Y') . ". No hay facultativos que cumplan la distancia mínima o los límites configurados."]);
             }
 
-            // LÓGICA DE EQUIDAD ANUAL Y DE PUNTOS PARA DÍAS DE DIARIO
             $elegido = $candidatos->sortBy(function($m) use ($stats, $fecha, $guardiasAInsertar) {
                 $cargaSemanal = collect($guardiasAInsertar)
                     ->where('user_id', $m->id)
@@ -347,7 +380,6 @@ class GuardiaController extends Controller
                 
                 $repiteDia = count(array_filter($stats[$m->id]['historial_dias_semana'], fn($d) => $d === $fecha->dayOfWeekIso));
 
-                // Multiplicadores: El motor intentará nivelar SIEMPRE los puntos de esfuerzo totales.
                 return ($stats[$m->id]['puntos_esfuerzo'] * 100) 
                      + ($stats[$m->id]['total_anual'] * 10) 
                      + ($cargaSemanal * 10) 
@@ -360,15 +392,14 @@ class GuardiaController extends Controller
                 'tipo' => 'diaria_17h', 'estado' => 'programada', 'is_manual' => false, 'observaciones' => 'IA', 'created_at' => now(), 'updated_at' => now()
             ];
 
-            // Actualizamos los marcadores en caliente
             $stats[$elegido->id]['total_mes']++;
             $stats[$elegido->id]['total_anual']++;
-            $stats[$elegido->id]['puntos_esfuerzo'] += 1; // +1 punto por guardia diaria
+            $stats[$elegido->id]['puntos_esfuerzo'] += 1;
             $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
             $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
         }
 
-        // Reemplazo transaccional: borramos la IA antigua, protegemos las manuales y metemos la IA nueva
+        // Transacción de guardado
         \Illuminate\Support\Facades\DB::transaction(function() use ($jefe, $mes, $anio, $guardiasAInsertar) {
             \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
                 ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
@@ -378,7 +409,7 @@ class GuardiaController extends Controller
             \App\Models\Guardia::insert($guardiasAInsertar);
         });
 
-        return back()->with('success', 'Cuadrante optimizado generado correctamente con equidad anual.');
+        return back()->with('success', 'Cuadrante generado respetando las reglas de salud laboral parametrizadas.');
     }
 
 

@@ -19,7 +19,7 @@ const modalAltaAbierto = ref(false);
 const modalEditarAbierto = ref(false);
 
 const formAlta = useForm({
-    name: '', email: '', rol: 'Facultativo', password: ''
+    name: '', email: '', rol: 'Facultativo'
 });
 
 const formEditar = useForm({
@@ -148,7 +148,6 @@ const eliminarFacultativo = (id, nombre) => {
                     <div><label class="block text-zinc-400 mb-1">Nombre</label><input v-model="formAlta.name" required type="text" placeholder="Dr. Juan Pérez" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800" /></div>
                     <div><label class="block text-zinc-400 mb-1">Email</label><input v-model="formAlta.email" required type="email" placeholder="medico@hospital.com" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800" /></div>
                     <div><label class="block text-zinc-400 mb-1">Rol</label><select v-model="formAlta.rol" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800"><option value="Facultativo">Facultativo</option><option value="Jefe de Servicio">Jefe de Servicio</option></select></div>
-                    <div><label class="block text-zinc-400 mb-1">Contraseña temporal</label><input v-model="formAlta.password" required type="text" class="w-full bg-zinc-950 text-emerald-400 font-mono p-2 rounded border border-zinc-800" /></div>
                     <div class="flex justify-end gap-2 pt-2"><button type="button" @click="modalAltaAbierto = false" class="px-3 py-1.5 text-zinc-400">Cancelar</button><button type="submit" :disabled="formAlta.processing" class="px-4 py-1.5 bg-emerald-500 text-zinc-950 font-bold rounded">Crear</button></div>
                 </form>
             </div>

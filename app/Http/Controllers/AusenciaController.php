@@ -117,6 +117,8 @@ class AusenciaController extends Controller
             'aprobado_por' => $request->user()->id,
         ]);
 
+        $ausencia->solicitante->notify(new \App\Notifications\EstadoAusenciaModificado($ausencia));
+
         return back();
     }
 }

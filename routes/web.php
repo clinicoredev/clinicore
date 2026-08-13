@@ -70,12 +70,25 @@ Route::middleware(['auth', 'verified'])->group(function () {
     
     // Motor IA y Operaciones Fijas
     Route::post('/guardias/generar', [GuardiaController::class, 'generarAlgoritmo'])->name('guardias.generar');
-    Route::post('/guardias/manual', [GuardiaController::class, 'storeManual'])->name('guardias.manual');
+    Route::post('/guardias/manual', [GuardiaController::class, 'guardarGuardiaManual'])->name('guardias.manual');
     Route::delete('/guardias/vaciar-mes', [GuardiaController::class, 'vaciarMes'])->name('guardias.vaciarMes');
     Route::post('/guardias/permutar', [GuardiaController::class, 'permutar'])->name('guardias.permutar');
     
     // Operaciones sobre una guardia específica (Comodín al final)
     Route::delete('/guardias/{guardia}', [GuardiaController::class, 'destroy'])->name('guardias.destroy');
 });
+
+Route::get('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'show'])
+    ->name('onboarding.password')->middleware('signed');
+
+    Route::post('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'store'])
+        ->name('onboarding.password.store')->middleware('signed');
+
+Route::post('/notificaciones/marcar-leidas', function (\Illuminate\Http\Request $request) {
+    // Busca todas las notificaciones no leídas del usuario y las marca como leídas
+    $request->user()->unreadNotifications->markAsRead();
+    // Devuelve al usuario a donde estaba sin recargar
+    return back();
+})->middleware('auth');
 
 require __DIR__.'/settings.php';
