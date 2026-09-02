@@ -41,7 +41,7 @@
         @fonts
 
         <!-- Scripts de Estilos y Compilación ÚNICA (TypeScript + Vue) -->
-        @vite(['resources/css/app.css', 'resources/js/app.ts', "resources/js/Pages/{$page['component']}.vue"])
+        @vite(['resources/css/app.css', 'resources/js/app.ts'])
         
         <!-- Cabecera semántica de Inertia -->
         <x-inertia::head>
