@@ -49,6 +49,35 @@ const mesSiguiente = () => {
 };
 
 // =========================================================================
+// SEPARACIÓN Y FILTRADO DE REGLAS
+// =========================================================================
+const limitacionesRecurrentes = computed(() => {
+    // Las recurrentes vienen en formato string "Los Lunes", "Los Martes" (sin barras de fecha)
+    return props.limitaciones.filter(l => !l.regla.includes('/'));
+});
+
+const limitacionesMensuales = computed(() => {
+    return props.limitaciones.filter(l => {
+        // Si no tiene barra, es recurrente y se ignora aquí
+        if (!l.regla.includes('/')) return false;
+        
+        // El string viene formateado desde el backend como 'dd/mm/yyyy'
+        const partes = l.regla.split('/');
+        if (partes.length === 3) {
+            const mesRegla = parseInt(partes[1], 10);
+            const anioRegla = parseInt(partes[2], 10);
+            
+            // Solo se muestra si coincide con el mes y año que estamos visualizando
+            return mesRegla === mesFiltro.value && anioRegla === anioFiltro.value;
+        }
+        return false;
+    });
+});
+
+const totalReglasVisibles = computed(() => limitacionesRecurrentes.value.length + limitacionesMensuales.value.length);
+
+
+// =========================================================================
 // MÁQUINA DE ESTADOS: PERMUTA PRO
 // =========================================================================
 const guardiaOrigen = ref(null);
@@ -100,12 +129,11 @@ const formGenerador = useForm({
     anio: anioFiltro.value,
     usar_plantilla_completa: true,
     medicos_incluidos: props.medicos.map(m => m.id),
-    // Nuevos filtros de restricciones
     respetar_salientes: true,
-    distancia_minima_dias: 2,  // 2 días = al menos 1 día de descanso entre guardias
-    max_guardias_mes: 0,       // 0 = Sin tope estricto
-    max_findes_mes: 0,         // 0 = Sin tope estricto
-    usar_memoria_anual: true   // Ponderar la equidad YTD del año entero
+    distancia_minima_dias: 2, 
+    max_guardias_mes: 0,      
+    max_findes_mes: 0,        
+    usar_memoria_anual: true  
 });
 
 const dispararAlgoritmo = () => {
@@ -395,7 +423,7 @@ const diasMatriz = computed(() => {
                 <CalendarDays class="w-3.5 h-3.5" /> Cuadrícula
             </button>
             <button @click="pestanaActual = 'reglas'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'reglas' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-zinc-400'">
-                <Ban class="w-3.5 h-3.5" /> Reglas ({{ limitaciones.length }})
+                <Ban class="w-3.5 h-3.5" /> Reglas ({{ totalReglasVisibles }})
             </button>
             <button v-if="permisos.es_jefe" @click="pestanaActual = 'manual'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'manual' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-zinc-400'">
                 <Pin class="w-3.5 h-3.5" /> Manual
@@ -510,15 +538,40 @@ const diasMatriz = computed(() => {
                 </form>
             </div>
 
-            <div :class="permisos.es_jefe ? 'lg:col-span-2' : 'lg:col-span-3'" class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-6">
-                <h3 class="font-bold text-white mb-4 text-sm sm:text-base flex items-center gap-2"><User class="w-4 h-4 text-emerald-400" /> Activas</h3>
-                <div v-if="limitaciones.length === 0" class="text-xs text-zinc-500 italic p-4 text-center border border-dashed border-zinc-800 rounded-lg">Sin restricciones.</div>
-                <div v-else class="space-y-3">
-                    <div v-for="regla in limitaciones" :key="regla.id" class="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center text-xs sm:text-sm gap-2">
-                        <div><span class="text-emerald-400 font-bold">{{ regla.medico }}</span> <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span></div>
-                        <button v-if="permisos.es_jefe" @click="router.delete(`/guardias/limitaciones/${regla.id}`)" class="text-rose-400 bg-rose-500/10 p-1.5 rounded self-end sm:self-auto cursor-pointer"><Trash2 class="w-3.5 h-3.5" /></button>
+            <div :class="permisos.es_jefe ? 'lg:col-span-2' : 'lg:col-span-3'" class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 sm:p-6 space-y-8">
+                
+                <!-- Sección 1: Reglas Recurrentes -->
+                <div>
+                    <h3 class="font-bold text-white mb-4 text-sm sm:text-base flex items-center gap-2">
+                        <User class="w-4 h-4 text-emerald-400" /> Patrones Recurrentes
+                    </h3>
+                    <div v-if="limitacionesRecurrentes.length === 0" class="text-xs text-zinc-500 italic p-4 text-center border border-dashed border-zinc-800 rounded-lg">
+                        No hay reglas recurrentes activas.
+                    </div>
+                    <div v-else class="space-y-3">
+                        <div v-for="regla in limitacionesRecurrentes" :key="regla.id" class="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center text-xs sm:text-sm gap-2">
+                            <div><span class="text-emerald-400 font-bold">{{ regla.medico }}</span> <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span></div>
+                            <button v-if="permisos.es_jefe" @click="router.delete(`/guardias/limitaciones/${regla.id}`)" class="text-rose-400 bg-rose-500/10 p-1.5 rounded self-end sm:self-auto cursor-pointer"><Trash2 class="w-3.5 h-3.5" /></button>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Sección 2: Reglas Mensuales (Filtradas por la fecha que estás viendo) -->
+                <div>
+                    <h3 class="font-bold text-white mb-4 text-sm sm:text-base flex items-center gap-2">
+                        <CalendarDays class="w-4 h-4 text-amber-400" /> Días Exactos (Mes Actual)
+                    </h3>
+                    <div v-if="limitacionesMensuales.length === 0" class="text-xs text-zinc-500 italic p-4 text-center border border-dashed border-zinc-800 rounded-lg">
+                        Ninguna restricción puntual registrada para este mes.
+                    </div>
+                    <div v-else class="space-y-3">
+                        <div v-for="regla in limitacionesMensuales" :key="regla.id" class="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center text-xs sm:text-sm gap-2">
+                            <div><span class="text-emerald-400 font-bold">{{ regla.medico }}</span> <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span></div>
+                            <button v-if="permisos.es_jefe" @click="router.delete(`/guardias/limitaciones/${regla.id}`)" class="text-rose-400 bg-rose-500/10 p-1.5 rounded self-end sm:self-auto cursor-pointer"><Trash2 class="w-3.5 h-3.5" /></button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
