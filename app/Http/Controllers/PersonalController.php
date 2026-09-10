@@ -63,7 +63,7 @@ class PersonalController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Facultativo', 'Residente'])],
+            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Admin de Residentes', 'Facultativo', 'Residente'])],
         ]);
 
         $nuevoMedico = User::create([
@@ -96,7 +96,7 @@ class PersonalController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)], 
-            'rol' => ['required', Rule::in(['Jefe de Servicio', 'Facultativo', 'Residente'])],
+            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Admin de Residentes', 'Facultativo', 'Residente'])],
         ]);
 
         $user->update([

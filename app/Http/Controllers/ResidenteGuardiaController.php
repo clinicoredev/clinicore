@@ -89,7 +89,7 @@ class ResidenteGuardiaController extends Controller
             'limitaciones' => $limitaciones,
             'medicos' => $medicos,
             'equidad' => $equidad,
-            'permisos' => ['es_jefe' => $usuario->hasRole('Jefe de Servicio')],
+            'permisos' => ['es_jefe' => $usuario->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])],
             'mes_actual' => (int)$mes,
             'anio_actual' => (int)$anio,
         ]);
@@ -123,7 +123,7 @@ class ResidenteGuardiaController extends Controller
 
     public function guardarGuardiaManual(Request $request)
     {
-        if (!$request->user()->hasRole('Jefe de Servicio')) abort(403);
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])) abort(403);
 
         $request->validate([
             'user_id' => 'required|exists:users,id',
@@ -153,7 +153,7 @@ class ResidenteGuardiaController extends Controller
 
     public function generarAlgoritmo(Request $request)
     {
-        if (!$request->user()->hasRole('Jefe de Servicio')) abort(403);
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])) abort(403);
 
         $request->validate([
             'mes' => 'required|integer|between:1,12', 

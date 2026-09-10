@@ -158,6 +158,7 @@ const eliminarFacultativo = (id, nombre) => {
                             <option value="Facultativo">Facultativo</option>
                             <option value="Residente">Residente</option>
                             <option value="Jefe de Servicio">Jefe de Servicio</option>
+                            <option value="Admin de Residentes">Admin de Residentes</option>
                         </select>
                     </div>
                     <div class="flex justify-end gap-2 pt-2"><button type="button" @click="modalAltaAbierto = false" class="px-3 py-1.5 text-zinc-400">Cancelar</button><button type="submit" :disabled="formAlta.processing" class="px-4 py-1.5 bg-emerald-500 text-zinc-950 font-bold rounded">Crear</button></div>
@@ -188,6 +189,7 @@ const eliminarFacultativo = (id, nombre) => {
                             <option value="Facultativo">Facultativo (Acceso estándar)</option>
                             <option value="Residente">Residente (Facultativo en formación)</option>
                             <option value="Jefe de Servicio">Jefe de Servicio (Control total)</option>
+                            <option value="Admin de Residentes">Admin de Residentes</option>
                         </select>
                     </div>
 
