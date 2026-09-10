@@ -297,7 +297,7 @@ const diasMatriz = computed(() => {
                     </button>
                     <button @click="dispararAlgoritmo" :disabled="formGenerador.processing" class="px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs sm:text-sm transition-all shadow-lg flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer">
                         <Sparkles class="w-4 h-4 fill-zinc-950" />
-                        {{ formGenerador.processing ? 'Resolviendo...' : 'Generar IA' }}
+                        {{ formGenerador.processing ? 'Resolviendo...' : 'Generar' }}
                     </button>
                     <div class="flex items-center gap-2">
                         <a :href="`/guardias/exportar/excel?mes=${mesFiltro}&anio=${anioFiltro}`" class="flex-1 text-center px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold text-xs border border-emerald-500/30">📊 Excel</a>
