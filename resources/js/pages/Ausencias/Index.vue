@@ -3,47 +3,64 @@ import { ref } from 'vue';
 import { Head, useForm, router, usePage } from '@inertiajs/vue3';
 import { 
     CalendarPlus, Calendar, Clock, CheckCircle2, 
-    XCircle, AlertCircle, FileText, User, X, ShieldAlert 
+    XCircle, FileText, User, X, Pencil, Trash2 
 } from '@lucide/vue';
 
 const props = defineProps({
     ausencias: Array,
-    medicos: Array, // NUEVO: Recibimos la lista de facultativos
+    medicos: Array,
     permisos: Object
 });
 
 const page = usePage();
-
-// Modal de solicitud
 const modalAbierto = ref(false);
-
-// Calculamos la fecha de hoy en formato YYYY-MM-DD para ponerla por defecto
+const editandoId = ref(null);
 const hoy = new Date().toISOString().split('T')[0];
 
 const form = useForm({
-    user_id: props.permisos.es_jefe && props.medicos.length > 0 ? props.medicos[0].id : page.props.auth.user.id, // NUEVO: Preselecciona un médico si es jefe
+    user_id: props.permisos.es_jefe && props.medicos.length > 0 ? props.medicos[0].id : page.props.auth.user.id,
     tipo: 'congreso',
     fecha_inicio: hoy,
     fecha_fin: hoy,
     motivo: 'Ponente principal en mesa redonda de actualización clínica.'
 });
 
-const enviarSolicitud = () => {
-    form.post('/ausencias', {
-        onSuccess: () => {
-            modalAbierto.value = false;
-            form.reset('motivo'); // Solo reseteamos el motivo por comodidad
-        }
-    });
+const abrirModalCreacion = () => {
+    editandoId.value = null;
+    form.reset();
+    modalAbierto.value = true;
 };
 
-// Acción exclusiva del Jefe de Servicio (Verbo PATCH)
+const abrirModalEdicion = (item) => {
+    editandoId.value = item.id;
+    form.user_id = item.user_id;
+    form.tipo = item.tipo_raw;
+    form.fecha_inicio = item.fecha_inicio;
+    form.fecha_fin = item.fecha_fin;
+    form.motivo = item.motivo;
+    modalAbierto.value = true;
+};
+
+const enviarSolicitud = () => {
+    if (editandoId.value) {
+        form.patch(`/ausencias/${editandoId.value}`, {
+            onSuccess: () => { modalAbierto.value = false; editandoId.value = null; form.reset(); }
+        });
+    } else {
+        form.post('/ausencias', {
+            onSuccess: () => { modalAbierto.value = false; form.reset('motivo'); }
+        });
+    }
+};
+
+const borrarAusencia = (id) => {
+    if (confirm('¿Estás seguro de que deseas eliminar y cancelar esta solicitud?')) {
+        router.delete(`/ausencias/${id}`, { preserveScroll: true });
+    }
+};
+
 const resolverPeticion = (id, nuevoEstado) => {
-    router.patch(`/ausencias/${id}/resolver`, {
-        estado: nuevoEstado
-    }, {
-        preserveScroll: true // Evita que la pantalla pegue un salto arriba al hacer clic
-    });
+    router.patch(`/ausencias/${id}/resolver`, { estado: nuevoEstado }, { preserveScroll: true });
 };
 </script>
 
@@ -66,7 +83,7 @@ const resolverPeticion = (id, nuevoEstado) => {
             </div>
 
             <button 
-                @click="modalAbierto = true"
+                @click="abrirModalCreacion"
                 type="button"
                 class="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm transition-all shadow-lg shadow-emerald-500/10 cursor-pointer active:scale-95 shrink-0"
             >
@@ -88,14 +105,14 @@ const resolverPeticion = (id, nuevoEstado) => {
             </div>
 
             <div v-else class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
+                <table class="w-full text-left border-collapse min-w-[700px]">
                     <thead>
                         <tr class="border-b border-zinc-800 bg-zinc-950/40 text-zinc-400 text-xs uppercase tracking-wider font-semibold">
                             <th class="py-3.5 px-6">Tipo / Motivo</th>
                             <th class="py-3.5 px-6">Facultativo</th>
                             <th class="py-3.5 px-6">Fechas</th>
                             <th class="py-3.5 px-6">Estado</th>
-                            <th class="py-3.5 px-6 text-right">Resolución</th>
+                            <th class="py-3.5 px-6 text-right">Controles</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-zinc-800/60 text-sm">
@@ -143,32 +160,33 @@ const resolverPeticion = (id, nuevoEstado) => {
                             </td>
 
                             <td class="py-4 px-6 text-right">
-                                
-                                <div v-if="permisos.es_jefe && item.estado === 'pendiente'" class="inline-flex items-center gap-2">
-                                    <button 
-                                        @click="resolverPeticion(item.id, 'aprobada')"
-                                        title="Autorizar permiso"
-                                        class="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-zinc-950 transition-all border border-emerald-500/30 cursor-pointer"
-                                    >
-                                        <CheckCircle2 class="w-4 h-4" />
-                                    </button>
+                                <div class="flex flex-col items-end gap-2">
+                                    
+                                    <!-- Controles del Jefe para Aprobar/Denegar -->
+                                    <div v-if="permisos.es_jefe && item.estado === 'pendiente'" class="inline-flex items-center gap-2">
+                                        <button @click="resolverPeticion(item.id, 'aprobada')" title="Autorizar permiso" class="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-zinc-950 transition-all border border-emerald-500/30 cursor-pointer">
+                                            <CheckCircle2 class="w-4 h-4" />
+                                        </button>
+                                        <button @click="resolverPeticion(item.id, 'denegada')" title="Denegar permiso" class="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-all border border-rose-500/30 cursor-pointer">
+                                            <XCircle class="w-4 h-4" />
+                                        </button>
+                                    </div>
 
-                                    <button 
-                                        @click="resolverPeticion(item.id, 'denegada')"
-                                        title="Denegar permiso"
-                                        class="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white transition-all border border-rose-500/30 cursor-pointer"
-                                    >
-                                        <XCircle class="w-4 h-4" />
-                                    </button>
+                                    <div v-else-if="item.estado !== 'pendiente'" class="text-[11px] text-zinc-500 mb-1">
+                                        Firmado por: <span class="text-zinc-400 font-medium">{{ item.revisor }}</span>
+                                    </div>
+
+                                    <!-- Controles de Edición/Borrado -->
+                                    <div v-if="item.estado === 'pendiente' || permisos.es_jefe" class="inline-flex items-center gap-1.5">
+                                        <button @click="abrirModalEdicion(item)" title="Editar" class="p-1.5 text-zinc-400 hover:text-blue-400 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer">
+                                            <Pencil class="w-3.5 h-3.5" />
+                                        </button>
+                                        <button @click="borrarAusencia(item.id)" title="Eliminar" class="p-1.5 text-zinc-400 hover:text-rose-400 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer">
+                                            <Trash2 class="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+
                                 </div>
-
-                                <div v-else-if="item.estado !== 'pendiente'" class="text-[11px] text-zinc-500">
-                                    Firmado por:<br>
-                                    <span class="text-zinc-400 font-medium">{{ item.revisor }}</span>
-                                </div>
-
-                                <span v-else class="text-xs text-zinc-600 italic">En revisión...</span>
-
                             </td>
 
                         </tr>
@@ -184,7 +202,7 @@ const resolverPeticion = (id, nuevoEstado) => {
                 <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-4 bg-zinc-950/50">
                     <h3 class="font-semibold text-white flex items-center gap-2">
                         <CalendarPlus class="w-4 h-4 text-emerald-400" />
-                        Tramitar Ausencia / Congreso
+                        {{ editandoId ? 'Editar Solicitud' : 'Tramitar Ausencia / Congreso' }}
                     </h3>
                     <button @click="modalAbierto = false" class="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800">
                         <X class="w-5 h-5" />
@@ -193,10 +211,9 @@ const resolverPeticion = (id, nuevoEstado) => {
 
                 <form @submit.prevent="enviarSolicitud" class="p-6 space-y-4">
                     
-                    <!-- NUEVO: Selector de Facultativo (Solo visible para Jefes) -->
                     <div v-if="permisos.es_jefe">
                         <label class="block text-xs font-medium text-amber-400 uppercase mb-1">Registrar en nombre de (Facultativo)</label>
-                        <select v-model="form.user_id" required class="w-full rounded-lg bg-amber-950/20 border border-amber-500/30 px-3.5 py-2 text-sm text-white focus:outline-hidden focus:border-amber-500">
+                        <select v-model="form.user_id" required class="w-full rounded-lg bg-amber-950/20 border border-amber-500/30 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
                             <option v-for="medico in medicos" :key="medico.id" :value="medico.id">
                                 {{ medico.name }}
                             </option>
@@ -205,7 +222,7 @@ const resolverPeticion = (id, nuevoEstado) => {
 
                     <div>
                         <label class="block text-xs font-medium text-zinc-400 uppercase mb-1">Tipo de Permiso</label>
-                        <select v-model="form.tipo" class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3.5 py-2 text-sm text-white focus:outline-hidden focus:border-emerald-500">
+                        <select v-model="form.tipo" class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
                             <option value="congreso">Asistencia a Congreso / Actividad Científica</option>
                             <option value="vacaciones">Vacaciones ordinarias</option>
                             <option value="asuntos_propios">Día de asuntos propios</option>
@@ -216,23 +233,23 @@ const resolverPeticion = (id, nuevoEstado) => {
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-medium text-zinc-400 uppercase mb-1">Primer día ausente</label>
-                            <input v-model="form.fecha_inicio" type="date" required class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white font-mono focus:outline-hidden focus:border-emerald-500" />
+                            <input v-model="form.fecha_inicio" type="date" required class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500" />
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-zinc-400 uppercase mb-1">Último día ausente</label>
-                            <input v-model="form.fecha_fin" type="date" required class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white font-mono focus:outline-hidden focus:border-emerald-500" />
+                            <input v-model="form.fecha_fin" type="date" required class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-emerald-500" />
                         </div>
                     </div>
 
                     <div>
                         <label class="block text-xs font-medium text-zinc-400 uppercase mb-1">Justificación / Detalles</label>
-                        <textarea v-model="form.motivo" rows="3" placeholder="Indica el nombre del congreso o notas para jefatura..." class="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-sm text-white focus:outline-hidden focus:border-emerald-500"></textarea>
+                        <textarea v-model="form.motivo" rows="3" placeholder="Indica el nombre del congreso o notas para jefatura..." class="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-sm text-white focus:outline-none focus:border-emerald-500"></textarea>
                     </div>
 
                     <div class="flex items-center justify-end gap-3 pt-4 border-t border-zinc-800">
                         <button @click="modalAbierto = false" type="button" class="px-4 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer">Cancelar</button>
                         <button type="submit" :disabled="form.processing" class="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm cursor-pointer disabled:opacity-50">
-                            {{ form.processing ? 'Enviando...' : 'Registrar Solicitud' }}
+                            {{ form.processing ? 'Procesando...' : (editandoId ? 'Guardar Cambios' : 'Registrar Solicitud') }}
                         </button>
                     </div>
 

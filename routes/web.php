@@ -60,6 +60,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/ausencias', [AusenciaController::class, 'index'])->name('ausencias.index');
     Route::post('/ausencias', [AusenciaController::class, 'store'])->name('ausencias.store');
     Route::patch('/ausencias/{ausencia}/resolver', [AusenciaController::class, 'resolver'])->name('ausencias.resolver');
+    Route::patch('/ausencias/{ausencia}', [AusenciaController::class, 'update'])->name('ausencias.update');
+    Route::delete('/ausencias/{ausencia}', [AusenciaController::class, 'destroy'])->name('ausencias.destroy');
 
     // --- MÓDULO GUARDIAS ---
     Route::get('/guardias', [GuardiaController::class, 'index'])->name('guardias.index');
