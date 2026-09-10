@@ -29,7 +29,7 @@ const menuNavegacion = computed(() => {
         { name: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
         { name: 'Calendario Completo', href: '/calendario-completo', icon: Layers },
         { name: 'Guardias y Turnos', href: '/guardias', icon: CalendarDays },
-        { name: 'Directorio Médico', href: '/personal', icon: Users },
+        { name: 'Directorio Facultativo', href: '/personal', icon: Users },
         { name: 'Permisos y Ausencias', href: '/ausencias', icon: CalendarClock },
     ];
 });

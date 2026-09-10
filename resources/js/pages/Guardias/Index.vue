@@ -141,7 +141,7 @@ const dispararAlgoritmo = () => {
     formGenerador.anio = anioFiltro.value;
     
     if (formGenerador.medicos_incluidos.length === 0) {
-        alert('Debes incluir al menos un médico en el algoritmo.');
+        alert('Debes incluir al menos un facultativo en el algoritmo.');
         return;
     }
 
@@ -318,7 +318,7 @@ const diasMatriz = computed(() => {
                 </div>
 
                 <div v-if="!formGenerador.usar_plantilla_completa" class="pt-1 pb-3 border-b border-zinc-800/60 animate-in fade-in">
-                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Médicos incluidos en esta corrida:</span>
+                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Facultativos incluidos en esta sesión:</span>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                         <label v-for="m in medicos" :key="m.id" class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors" :class="formGenerador.medicos_incluidos.includes(m.id) ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500'">
                             <input type="checkbox" :value="m.id" v-model="formGenerador.medicos_incluidos" class="hidden">
@@ -352,7 +352,7 @@ const diasMatriz = computed(() => {
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-xs font-bold text-white mb-1">Max Guardias / Médico / Mes</label>
+                            <label class="block text-xs font-bold text-white mb-1">Max Guardias / Facultativo / Mes</label>
                             <div class="flex items-center gap-2">
                                 <input type="number" min="0" max="15" v-model="formGenerador.max_guardias_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono">
                                 <span class="text-[10px] text-zinc-500">(0 = Sin límite estricto)</span>
@@ -360,7 +360,7 @@ const diasMatriz = computed(() => {
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-xs font-bold text-white mb-1">Max Findes / Médico / Mes</label>
+                            <label class="block text-xs font-bold text-white mb-1">Max Findes / Facultativo / Mes</label>
                             <div class="flex items-center gap-2">
                                 <input type="number" min="0" max="5" v-model="formGenerador.max_findes_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono">
                                 <span class="text-[10px] text-zinc-500">(0 = Sin límite estricto)</span>
@@ -577,7 +577,7 @@ const diasMatriz = computed(() => {
 
         <div v-if="pestanaActual === 'manual' && permisos.es_jefe" class="max-w-md w-full bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-800 mx-auto animate-in fade-in">
             <form @submit.prevent="guardarGuardiaManual" class="space-y-4">
-                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm"><option value="" disabled selected>Médico...</option><option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option></select>
+                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm"><option value="" disabled selected>Facultativo...</option><option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option></select>
                 <input v-model="formManual.fecha" required type="date" class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 font-mono text-xs sm:text-sm" />
                 <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm"><option value="diaria_17h">Diario (17h)</option><option value="festivo_24h">Festivo (24h)</option></select>
                 <button type="submit" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center gap-2 cursor-pointer"><Pin class="w-4 h-4" /> Fijar Turno</button>
@@ -597,7 +597,7 @@ const diasMatriz = computed(() => {
                 <div class="p-6">
                     <form @submit.prevent="guardarGuardiaDesdeCalendario" class="space-y-4">
                         <div>
-                            <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Médico Asignado</label>
+                            <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Facultativo Asignado</label>
                             <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm">
                                 <option value="" disabled selected>Selecciona un facultativo...</option>
                                 <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>

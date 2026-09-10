@@ -121,7 +121,7 @@ defineProps({
                 
                 <div class="text-center max-w-2xl mx-auto mb-16 space-y-3">
                     <h2 class="text-xs font-mono uppercase tracking-widest text-emerald-400 font-bold">Arquitectura Desacoplada</h2>
-                    <p class="text-3xl font-bold text-white tracking-tight">Diseñado por cirujanos del software para facultativos médicos</p>
+                    <p class="text-3xl font-bold text-white tracking-tight">Diseñado por cirujanos del software para facultativos sanitarios</p>
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8">

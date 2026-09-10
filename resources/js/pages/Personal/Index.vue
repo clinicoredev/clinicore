@@ -54,7 +54,7 @@ const eliminarFacultativo = (id, nombre) => {
 </script>
 
 <template>
-    <Head title="Equipo Médico" />
+    <Head title="Equipo Facultativo" />
 
     <div class="space-y-6 relative">
         
@@ -80,7 +80,7 @@ const eliminarFacultativo = (id, nombre) => {
             </div>
 
             <button v-if="permisos.es_jefe && metricas_plan.puede_invitar" @click="modalAltaAbierto = true" class="px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm transition-all cursor-pointer shrink-0 flex items-center gap-2">
-                <UserPlus class="w-4 h-4" /> Dar de alta médico
+                <UserPlus class="w-4 h-4" /> Dar de alta facultativo
             </button>
         </div>
 

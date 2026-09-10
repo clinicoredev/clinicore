@@ -54,7 +54,7 @@ const cerrarModal = () => {
 // ACCIONES: ELIMINAR Y EDITAR TENANTS
 // ==========================================
 const eliminarTenant = (id, nombre) => {
-    if (confirm(`⚠️ PELIGRO: ¿Estás seguro de que quieres eliminar TODA la infraestructura de ${nombre}? Se borrarán sus médicos, guardias y configuraciones.`)) {
+    if (confirm(`⚠️ PELIGRO: ¿Estás seguro de que quieres eliminar TODA la infraestructura de ${nombre}? Se borrarán sus facultativos, guardias y configuraciones.`)) {
         router.delete(`/admin/tenants/${id}`, { preserveScroll: true });
     }
 };

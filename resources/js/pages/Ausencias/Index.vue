@@ -61,7 +61,7 @@ const resolverPeticion = (id, nuevoEstado) => {
                     </span>
                 </h2>
                 <p class="text-sm text-zinc-400 mt-1">
-                    {{ permisos.es_jefe ? 'Gestiona y autoriza las ausencias de tu equipo médico.' : 'Consulta el estado de tus solicitudes enviadas a jefatura.' }}
+                    {{ permisos.es_jefe ? 'Gestiona y autoriza las ausencias de tu equipo facultativo.' : 'Consulta el estado de tus solicitudes enviadas a jefatura.' }}
                 </p>
             </div>
 
