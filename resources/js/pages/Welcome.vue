@@ -48,13 +48,6 @@ defineProps({
                             Acceso Facultativos
                         </Link>
 
-                        <Link 
-                            v-if="canRegister" 
-                            href="/register" 
-                            class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-sm transition-all shadow-lg shadow-emerald-500/20 active:scale-95 cursor-pointer"
-                        >
-                            Alta de Servicio (Demo Gratuita)
-                        </Link>
                     </template>
                 </nav>
 
@@ -80,14 +73,6 @@ defineProps({
                 </p>
 
                 <div class="pt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
-                    <Link 
-                        v-if="canRegister"
-                        href="/register" 
-                        class="w-full sm:w-auto px-8 py-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-black text-base transition-all shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-3 cursor-pointer group active:scale-95"
-                    >
-                        Desplegar Nuevo Tenant
-                        <ArrowRight class="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                    </Link>
 
                     <Link 
                         href="/login" 

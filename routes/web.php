@@ -10,6 +10,7 @@ use App\Http\Controllers\AusenciaController;
 use App\Http\Controllers\CalendarioGlobalController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GuardiaController;
+use App\Http\Controllers\ResidenteGuardiaController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -76,6 +77,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
     
     // Operaciones sobre una guardia específica (Comodín al final)
     Route::delete('/guardias/{guardia}', [GuardiaController::class, 'destroy'])->name('guardias.destroy');
+
+    Route::prefix('residentes')->middleware(['auth'])->group(function () {
+        Route::get('/guardias', [ResidenteGuardiaController::class, 'index'])->name('residentes.guardias.index');
+        Route::post('/guardias/generar', [ResidenteGuardiaController::class, 'generarAlgoritmo']);
+        Route::post('/guardias/manual', [ResidenteGuardiaController::class, 'guardarGuardiaManual']);
+        Route::post('/guardias/permutar', [ResidenteGuardiaController::class, 'permutar']);
+        Route::delete('/guardias/vaciar-mes', [ResidenteGuardiaController::class, 'vaciarMes']);
+        Route::delete('/guardias/{guardia}', [ResidenteGuardiaController::class, 'destroy']);
+        
+        // Rutas de limitaciones para residentes
+        Route::post('/guardias/limitaciones', [ResidenteGuardiaController::class, 'storeLimitacion']);
+        Route::delete('/guardias/limitaciones/{limitacion}', [ResidenteGuardiaController::class, 'destroyLimitacion']);
+    });
 });
 
 Route::get('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'show'])

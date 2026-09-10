@@ -111,8 +111,14 @@ const eliminarFacultativo = (id, nombre) => {
                         </td>
 
                         <td class="py-4 px-6">
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border" :class="miembro.rol === 'Jefe de Servicio' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'">
-                                <Shield v-if="miembro.rol === 'Jefe de Servicio'" class="w-3 h-3" /><User v-else class="w-3 h-3" /> {{ miembro.rol }}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border" :class="{
+                                'bg-amber-500/10 text-amber-400 border-amber-500/20': miembro.rol === 'Jefe de Servicio',
+                                'bg-blue-500/10 text-blue-400 border-blue-500/20': miembro.rol === 'Facultativo',
+                                'bg-purple-500/10 text-purple-400 border-purple-500/20': miembro.rol === 'Residente'
+                            }">
+                                <Shield v-if="miembro.rol === 'Jefe de Servicio'" class="w-3 h-3" />
+                                <User v-else class="w-3 h-3" /> 
+                                {{ miembro.rol }}
                             </span>
                         </td>
 
@@ -147,7 +153,13 @@ const eliminarFacultativo = (id, nombre) => {
                 <form @submit.prevent="enviarAlta" class="space-y-4 text-xs">
                     <div><label class="block text-zinc-400 mb-1">Nombre</label><input v-model="formAlta.name" required type="text" placeholder="Dr. Juan Pérez" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800" /></div>
                     <div><label class="block text-zinc-400 mb-1">Email</label><input v-model="formAlta.email" required type="email" placeholder="medico@hospital.com" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800" /></div>
-                    <div><label class="block text-zinc-400 mb-1">Rol</label><select v-model="formAlta.rol" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800"><option value="Facultativo">Facultativo</option><option value="Jefe de Servicio">Jefe de Servicio</option></select></div>
+                    <div><label class="block text-zinc-400 mb-1">Rol</label>
+                        <select v-model="formAlta.rol" class="w-full bg-zinc-950 text-white p-2 rounded border border-zinc-800">
+                            <option value="Facultativo">Facultativo</option>
+                            <option value="Residente">Residente</option>
+                            <option value="Jefe de Servicio">Jefe de Servicio</option>
+                        </select>
+                    </div>
                     <div class="flex justify-end gap-2 pt-2"><button type="button" @click="modalAltaAbierto = false" class="px-3 py-1.5 text-zinc-400">Cancelar</button><button type="submit" :disabled="formAlta.processing" class="px-4 py-1.5 bg-emerald-500 text-zinc-950 font-bold rounded">Crear</button></div>
                 </form>
             </div>
@@ -174,6 +186,7 @@ const eliminarFacultativo = (id, nombre) => {
                         <label class="block text-zinc-400 uppercase mb-1">Rango / Permisos</label>
                         <select v-model="formEditar.rol" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:border-emerald-500 focus:outline-none">
                             <option value="Facultativo">Facultativo (Acceso estándar)</option>
+                            <option value="Residente">Residente (Facultativo en formación)</option>
                             <option value="Jefe de Servicio">Jefe de Servicio (Control total)</option>
                         </select>
                     </div>

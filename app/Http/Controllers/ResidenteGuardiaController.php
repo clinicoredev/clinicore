@@ -14,25 +14,27 @@ use Inertia\Inertia;
 use Maatwebsite\Excel\Facades\Excel;
 use Barryvdh\DomPDF\Facade\Pdf;
 
-class GuardiaController extends Controller
+class ResidenteGuardiaController extends Controller
 {
     public function index(Request $request)
     {
         $usuario = $request->user();
+
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
 
-        // 1. MÉDICOS: Solo Adjuntos (excluyendo SuperAdmins y Residentes)
+        // 1. MÉDICOS (DESPLEGABLES): Solo del Tenant actual y con rol Residente
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
+            ->whereHas('roles', function ($query) {
+                $query->where('name', 'Residente');
+            })
             ->get();
 
-        // Extraemos los IDs para blindar el resto de consultas
-        $idsAdjuntos = $medicos->pluck('id')->toArray();
+        $idsResidentes = $medicos->pluck('id')->toArray();
 
-        // 2. GUARDIAS: Aislamiento estricto por especialidad_id y IDs de Adjuntos
-        $guardias = \App\Models\Guardia::where('especialidad_id', $usuario->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+        // 2. GUARDIAS: Aislamiento estricto por especialidad_id y IDs de Residentes
+        $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
             ->with('facultativo') 
             ->whereMonth('fecha', $mes)
             ->whereYear('fecha', $anio)
@@ -52,10 +54,10 @@ class GuardiaController extends Controller
                 'observaciones' => $g->observaciones
             ]);
 
-        // 3. LIMITACIONES: Filtradas estrictamente por los IDs de Adjuntos
+        // 3. LIMITACIONES: Filtradas por IDs de Residentes
         $limitaciones = LimitacionGuardia::with('facultativo')
             ->where('especialidad_id', $usuario->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+            ->whereIn('user_id', $idsResidentes)
             ->get()
             ->map(function ($l) {
                 $mapaDias = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
@@ -70,9 +72,10 @@ class GuardiaController extends Controller
                 ];
             });
 
-        // 4. CÁLCULO DE EQUIDAD
+        // 4. CÁLCULO DE EQUIDAD (Auditoría del mes actual)
         $equidad = $medicos->map(function ($medico) use ($guardias) {
             $misGuardias = $guardias->where('user_id', $medico->id);
+            
             return [
                 'nombre' => str_replace(['Dr. ', 'Dra. '], '', $medico->name),
                 'totales' => $misGuardias->count(),
@@ -80,7 +83,8 @@ class GuardiaController extends Controller
             ];
         })->sortByDesc('totales')->values();
 
-        return inertia('Guardias/Index', [
+        // 5. PERMISOS FRONTEND: Apuntamos a la nueva carpeta de Residentes
+        return inertia('Residentes/Guardias/Index', [
             'guardias' => $guardias,
             'limitaciones' => $limitaciones,
             'medicos' => $medicos,
@@ -129,13 +133,12 @@ class GuardiaController extends Controller
 
         $jefe = $request->user();
 
-        // Borra la guardia de este usuario en esta fecha antes de crearla
-        \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+        Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->where('fecha', $request->fecha)
-            ->where('user_id', $request->user_id)
+            ->where('user_id', $request->user_id) // Solo borra a esta persona, permite solapamiento manual
             ->delete();
 
-        \App\Models\Guardia::create([
+        Guardia::create([
             'especialidad_id' => $jefe->especialidad_id,
             'user_id' => $request->user_id,
             'fecha' => $request->fecha,
@@ -155,7 +158,7 @@ class GuardiaController extends Controller
         $request->validate([
             'mes' => 'required|integer|between:1,12', 
             'anio' => 'required|integer', 
-            'personas_por_dia' => 'required|integer|min:1|max:10', // Añadido soporte de solapamiento
+            'personas_por_dia' => 'required|integer|min:1|max:10',
             'medicos_incluidos' => 'nullable|array',
             'respetar_salientes' => 'boolean',
             'distancia_minima_dias' => 'nullable|integer|min:1|max:5',
@@ -174,13 +177,12 @@ class GuardiaController extends Controller
         $maxGuardiasMes = (int) $request->input('max_guardias_mes', 0);
         $maxFindesMes = (int) $request->input('max_findes_mes', 0);
         $usarMemoriaAnual = $request->boolean('usar_memoria_anual', true);
-
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        // 1. Cargamos médicos filtrados
+        // 1. Cargamos médicos filtrados por el rol Residente
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
-            ->whereDoesntHave('roles', function ($query) {
-                $query->whereIn('name', ['SuperAdmin', 'Residente']);
+            ->whereHas('roles', function ($query) {
+                $query->where('name', 'Residente');
             })
             ->when($request->has('medicos_incluidos'), function ($query) use ($request) {
                 $query->whereIn('id', $request->input('medicos_incluidos'));
@@ -188,33 +190,34 @@ class GuardiaController extends Controller
             ->get();
 
         if ($medicos->count() < $personasPorDia) {
-            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos para cubrir los puestos.']);
+            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes residentes para cubrir '.$personasPorDia.' puestos simultáneos.']);
         }
 
-        $idsAdjuntos = $medicos->pluck('id')->toArray();
+        $idsResidentes = $medicos->pluck('id')->toArray();
 
         // 2. Cargamos ausencias y limitaciones aisladas
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
         $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
 
         $ausencias = Ausencia::where('especialidad_id', $jefe->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+            ->whereIn('user_id', $idsResidentes)
             ->where('estado', 'aprobada')
             ->where('fecha_inicio', '<=', $finMes)
             ->where('fecha_fin', '>=', $inicioMes)
             ->get();
 
         $limitaciones = LimitacionGuardia::where('especialidad_id', $jefe->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+            ->whereIn('user_id', $idsResidentes)
             ->get();
 
-        $guardiasManuales = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+        // 3. LECTURA DE GUARDIAS MANUALES
+        $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
             ->where('is_manual', true)
             ->get();
 
-        // 4. ESTRUCTURA DE ESTADÍSTICAS Y FATIGA (Con equidad relativa)
+        // 4. ESTRUCTURA DE ESTADÍSTICAS Y EQUIDAD RELATIVA
         $stats = [];
         foreach ($medicos as $m) {
             $diasDisponibles = $diasDelMes;
@@ -241,8 +244,8 @@ class GuardiaController extends Controller
 
         if ($usarMemoriaAnual) {
             $inicioAnio = Carbon::createFromDate($anio, 1, 1)->startOfDay();
-            $historico = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
-                ->whereIn('user_id', $idsAdjuntos)
+            $historico = Guardia::where('especialidad_id', $jefe->especialidad_id)
+                ->whereIn('user_id', $idsResidentes)
                 ->whereBetween('fecha', [$inicioAnio, $inicioMes->copy()->subDay()->endOfDay()])
                 ->get();
 
@@ -288,7 +291,7 @@ class GuardiaController extends Controller
             if ($maxGuardiasMes > 0 && $stats[$medicoId]['total_mes'] >= $maxGuardiasMes) return false;
             if ($maxFindesMes > 0 && $fecha->isWeekend() && $stats[$medicoId]['findes_mes'] >= $maxFindesMes) return false;
             
-            // Bloqueo de solapamiento del MISMO usuario en el mismo día
+            // Bloquear si el médico ya tiene guardia ese mismo día (prevención de auto-solapamiento)
             if (collect($guardiasAInsertar)->where('user_id', $medicoId)->where('fecha', $fecha->format('Y-m-d'))->count() > 0) return false;
 
             foreach ($ausencias as $a) {
@@ -343,6 +346,7 @@ class GuardiaController extends Controller
                 $stats[$elegido->id]['puntos_esfuerzo'] += 2;
                 $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
                 $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
+                
                 $puestosCubiertos++;
             }
         }
@@ -373,36 +377,34 @@ class GuardiaController extends Controller
                 $stats[$elegido->id]['puntos_esfuerzo'] += 1;
                 $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
                 $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
+                
                 $puestosCubiertos++;
             }
         }
 
         // Transacción de guardado
-        \Illuminate\Support\Facades\DB::transaction(function() use ($jefe, $mes, $anio, $idsAdjuntos, $guardiasAInsertar) {
-            \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
-                ->whereIn('user_id', $idsAdjuntos)
+        DB::transaction(function() use ($jefe, $mes, $anio, $idsResidentes, $guardiasAInsertar) {
+            Guardia::where('especialidad_id', $jefe->especialidad_id)
+                ->whereIn('user_id', $idsResidentes)
                 ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
                 ->where('is_manual', false)
                 ->delete();
                 
-            \App\Models\Guardia::insert($guardiasAInsertar);
+            Guardia::insert($guardiasAInsertar);
         });
 
-        return back()->with('success', 'Cuadrante generado respetando las reglas de salud laboral.');
+        return back()->with('success', 'Cuadrante de Residentes generado con éxito.');
     }
-
 
     public function borrarTodo(Request $request)
     {
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
         $jefe = $request->user();
 
-        $idsAdjuntos = User::where('especialidad_id', $jefe->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
-            ->pluck('id')->toArray();
-
-        \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+        // Borra solo las guardias de residentes del mes seleccionado
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->where('name', 'Residente'))->pluck('id')->toArray();
+        Guardia::where('especialidad_id', $jefe->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
             ->whereMonth('fecha', $request->mes)
             ->whereYear('fecha', $request->anio)
             ->delete();
@@ -415,6 +417,7 @@ class GuardiaController extends Controller
         if ($guardia->especialidad_id !== $request->user()->especialidad_id) {
             abort(403, 'Acceso denegado.');
         }
+
         $guardia->delete();
         return back()->with('success', 'Turno liberado correctamente.');
     }
@@ -422,13 +425,10 @@ class GuardiaController extends Controller
     public function vaciarMes(Request $request)
     {
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->where('name', 'Residente'))->pluck('id')->toArray();
 
-        $idsAdjuntos = User::where('especialidad_id', $request->user()->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
-            ->pluck('id')->toArray();
-
-        \App\Models\Guardia::where('especialidad_id', $request->user()->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+        Guardia::where('especialidad_id', $request->user()->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
             ->whereMonth('fecha', $request->mes)
             ->whereYear('fecha', $request->anio)
             ->delete();
@@ -443,8 +443,8 @@ class GuardiaController extends Controller
             'destino_id' => 'required|exists:guardias,id',
         ]);
 
-        $guardia1 = \App\Models\Guardia::find($request->origen_id);
-        $guardia2 = \App\Models\Guardia::find($request->destino_id);
+        $guardia1 = Guardia::find($request->origen_id);
+        $guardia2 = Guardia::find($request->destino_id);
 
         if ($guardia1->especialidad_id !== $request->user()->especialidad_id || $guardia2->especialidad_id !== $request->user()->especialidad_id) {
             abort(403);
@@ -467,9 +467,8 @@ class GuardiaController extends Controller
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
         $especialidadId = $request->user()->especialidad_id;
-        $nombreArchivo = "Cuadrante_Guardias_{$mes}_{$anio}.xlsx";
 
-        return Excel::download(new GuardiasExport($especialidadId, $mes, $anio), $nombreArchivo);
+        return Excel::download(new GuardiasExport($especialidadId, $mes, $anio), "Cuadrante_Residentes_{$mes}_{$anio}.xlsx");
     }
 
     public function exportarPdf(Request $request)
@@ -478,12 +477,10 @@ class GuardiaController extends Controller
         $anio = $request->query('anio', now()->year);
         $usuario = $request->user();
 
-        $idsAdjuntos = User::where('especialidad_id', $usuario->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
-            ->pluck('id')->toArray();
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->where('name', 'Residente'))->pluck('id')->toArray();
 
-        $guardias = \App\Models\Guardia::where('especialidad_id', $usuario->especialidad_id)
-            ->whereIn('user_id', $idsAdjuntos)
+        $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
             ->with('facultativo')
             ->whereMonth('fecha', $mes)
             ->whereYear('fecha', $anio)
@@ -498,6 +495,6 @@ class GuardiaController extends Controller
             'especialidad' => $usuario->especialidad->nombre ?? 'Unidad'
         ]);
 
-        return $pdf->download("Cuadrante_Guardias_{$mes}_{$anio}.pdf");
+        return $pdf->download("Cuadrante_Residentes_{$mes}_{$anio}.pdf");
     }
 }

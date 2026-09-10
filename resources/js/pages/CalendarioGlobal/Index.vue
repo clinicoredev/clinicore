@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
-import { Layers, Activity, CalendarOff, Filter } from '@lucide/vue';
+import { Layers, Activity, CalendarOff, Filter, Users } from '@lucide/vue';
 
 const props = defineProps({
     eventos: Array,
@@ -11,8 +11,18 @@ const props = defineProps({
 });
 
 // ESTADOS REACTIVOS PARA LOS FILTROS
-const filtroTipo = ref('todos'); // 'todos', 'guardias', 'ausencias'
+const filtroGrupo = ref('adjuntos'); // Opciones: 'adjuntos', 'residentes', 'todos'
+const filtroTipo = ref('todos'); // Opciones: 'todos', 'guardias', 'ausencias'
 const filtroMedico = ref('todos'); // 'todos' o ID del médico
+
+// COMPUTADO: Filtra el desplegable de médicos según el grupo activo
+const medicosFiltrados = computed(() => {
+    return props.medicos.filter(m => {
+        if (filtroGrupo.value === 'todos') return true;
+        if (filtroGrupo.value === 'adjuntos') return m.rol !== 'Residente';
+        return m.rol === 'Residente';
+    });
+});
 
 // COMPUTADO: Filtra los eventos antes de enviarlos a la rejilla
 const eventosFiltrados = computed(() => {
@@ -23,7 +33,12 @@ const eventosFiltrados = computed(() => {
         
         const cumpleMedico = filtroMedico.value === 'todos' || ev.user_id === filtroMedico.value;
         
-        return cumpleTipo && cumpleMedico;
+        const esResidente = ev.rol === 'Residente';
+        const cumpleGrupo = filtroGrupo.value === 'todos' ||
+                            (filtroGrupo.value === 'adjuntos' && !esResidente) ||
+                            (filtroGrupo.value === 'residentes' && esResidente);
+        
+        return cumpleTipo && cumpleMedico && cumpleGrupo;
     });
 });
 
@@ -41,7 +56,7 @@ const cambiarMes = (nuevoMes) => {
 
 const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
-// REJILLA MAESTRA ACTUALIZADA (Usa eventosFiltrados en lugar de props.eventos)
+// REJILLA MAESTRA ACTUALIZADA
 const rejillaMaestra = computed(() => {
     const diasEnMes = new Date(props.anio_actual, props.mes_actual, 0).getDate();
     let primerDiaSemana = new Date(props.anio_actual, props.mes_actual - 1, 1).getDay();
@@ -107,26 +122,40 @@ const rejillaMaestra = computed(() => {
         <!-- BARRA DE FILTROS INTERACTIVA -->
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col lg:flex-row justify-between items-center gap-4 shadow-lg">
             
-            <div class="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto">
+            <div class="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto flex-wrap">
+                
+                <!-- Selector de Grupos (Residentes vs Adjuntos) -->
+                <div class="flex bg-zinc-950 rounded-xl p-1 border border-zinc-800 w-full sm:w-auto">
+                    <button @click="filtroGrupo = 'adjuntos'; filtroMedico = 'todos'" :class="filtroGrupo === 'adjuntos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                        <Users class="w-4 h-4" /> Adjuntos
+                    </button>
+                    <button @click="filtroGrupo = 'residentes'; filtroMedico = 'todos'" :class="filtroGrupo === 'residentes' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                        Residentes
+                    </button>
+                    <button @click="filtroGrupo = 'todos'" :class="filtroGrupo === 'todos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                        Todos
+                    </button>
+                </div>
+
                 <!-- Selector de Tipos -->
                 <div class="flex bg-zinc-950 rounded-xl p-1 border border-zinc-800 w-full sm:w-auto">
-                    <button @click="filtroTipo = 'todos'" :class="filtroTipo === 'todos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5">
+                    <button @click="filtroTipo = 'todos'" :class="filtroTipo === 'todos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
                         <Layers class="w-4 h-4" /> Todo
                     </button>
-                    <button @click="filtroTipo = 'guardias'" :class="filtroTipo === 'guardias' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5">
+                    <button @click="filtroTipo = 'guardias'" :class="filtroTipo === 'guardias' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
                         <Activity class="w-4 h-4" /> Guardias
                     </button>
-                    <button @click="filtroTipo = 'ausencias'" :class="filtroTipo === 'ausencias' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5">
+                    <button @click="filtroTipo = 'ausencias'" :class="filtroTipo === 'ausencias' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20 shadow' : 'text-zinc-500 hover:text-zinc-300 border border-transparent'" class="flex-1 sm:flex-none px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
                         <CalendarOff class="w-4 h-4" /> Ausencias
                     </button>
                 </div>
 
-                <!-- Selector de Médicos -->
-                <div class="relative w-full sm:w-64">
+                <!-- Selector de Médicos Dinámico -->
+                <div class="relative w-full sm:w-56">
                     <Filter class="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <select v-model="filtroMedico" class="w-full bg-zinc-950 border border-zinc-800 text-zinc-300 text-xs rounded-xl pl-9 pr-3 py-2.5 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 outline-none appearance-none cursor-pointer hover:border-zinc-700 transition-colors">
-                        <option value="todos">Todos los facultativos</option>
-                        <option v-for="medico in medicos" :key="medico.id" :value="medico.id">
+                        <option value="todos">Cualquier facultativo...</option>
+                        <option v-for="medico in medicosFiltrados" :key="medico.id" :value="medico.id">
                             {{ medico.name }}
                         </option>
                     </select>
@@ -155,6 +184,7 @@ const rejillaMaestra = computed(() => {
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-xs bg-emerald-500/20 border border-emerald-500"></span> Guardia Ordinaria (17h)</span>
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-xs bg-amber-500/20 border border-amber-500"></span> Guardia Finde (24h)</span>
             <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-xs bg-rose-500/20 border border-rose-500"></span> Ausencia / Congreso</span>
+            <span class="flex items-center gap-1.5"><span class="px-1 py-0.5 rounded text-[9px] bg-purple-500/20 text-purple-400 font-bold">MIR</span> Residente en Formación</span>
         </div>
 
         <!-- Rejilla -->
@@ -197,7 +227,10 @@ const rejillaMaestra = computed(() => {
                             }"
                             :title="`${ev.tipo}: ${ev.detalle}`"
                         >
-                            <span class="truncate uppercase tracking-tight">{{ ev.medico }}</span>
+                            <div class="flex items-center gap-1 overflow-hidden">
+                                <span class="truncate uppercase tracking-tight">{{ ev.medico }}</span>
+                                <span v-if="ev.rol === 'Residente'" class="text-[8px] bg-purple-500/20 text-purple-300 px-1 rounded shrink-0 font-bold">MIR</span>
+                            </div>
                             <span class="text-[8px] opacity-70 font-mono shrink-0">{{ ev.detalle.slice(0,3) }}</span>
                         </div>
 

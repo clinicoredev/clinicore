@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Ausencia;
 use App\Models\Guardia;
-use App\Models\User; // Añadido para poder listar a los médicos
+use App\Models\User;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
@@ -24,17 +24,19 @@ class CalendarioGlobalController extends Controller
 
         $streamEventos = collect();
 
-        // 1. INGESTA DE GUARDIAS DEL MES
+        // 1. INGESTA DE GUARDIAS DEL MES (Adjuntos y Residentes)
+        // Añadimos 'facultativo.roles' para poder leer el cargo de cada médico
         $guardias = Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
-            ->with('facultativo:id,name')->get();
+            ->with('facultativo.roles')->get();
 
         foreach ($guardias as $g) {
             $streamEventos->push([
                 'id' => 'g_' . $g->id,
-                'user_id' => $g->facultativo->id, // INYECTADO PARA EL FILTRO
+                'user_id' => $g->facultativo->id, 
                 'fecha' => $g->fecha->format('Y-m-d'),
                 'medico' => str_replace(['Dr. ', 'Dra. '], '', $g->facultativo->name),
+                'rol' => $g->facultativo->roles->first()?->name ?? 'Facultativo', // INYECTADO PARA EL FRONTEND
                 'tipo' => 'GUARDIA',
                 'detalle' => $g->tipo === 'festivo_24h' ? '24h (Finde)' : '17h (Diaria)',
                 'estilo' => $g->tipo === 'festivo_24h' ? 'guardia_finde' : 'guardia_diaria'
@@ -42,6 +44,7 @@ class CalendarioGlobalController extends Controller
         }
 
         // 2. INGESTA Y "EXPLOSIÓN" DE RANGOS DE VACACIONES
+        // Añadimos 'solicitante.roles' al Eager Loading
         $ausencias = Ausencia::where('especialidad_id', $jefe->especialidad_id)
             ->where('estado', 'aprobada')
             ->where(function ($query) use ($inicioMes, $finMes) {
@@ -49,7 +52,7 @@ class CalendarioGlobalController extends Controller
                       ->orWhereBetween('fecha_fin', [$inicioMes, $finMes])
                       ->orWhere(fn($q) => $q->where('fecha_inicio', '<', $inicioMes)->where('fecha_fin', '>', $finMes));
             })
-            ->with('solicitante:id,name')->get();
+            ->with('solicitante.roles')->get();
 
         foreach ($ausencias as $a) {
             $rango = CarbonPeriod::create(
@@ -60,9 +63,10 @@ class CalendarioGlobalController extends Controller
             foreach ($rango as $fecha) {
                 $streamEventos->push([
                     'id' => 'a_' . $a->id . '_' . $fecha->format('d'),
-                    'user_id' => $a->solicitante->id, // INYECTADO PARA EL FILTRO
+                    'user_id' => $a->solicitante->id, 
                     'fecha' => $fecha->format('Y-m-d'),
                     'medico' => str_replace(['Dr. ', 'Dra. '], '', $a->solicitante->name),
+                    'rol' => $a->solicitante->roles->first()?->name ?? 'Facultativo', // INYECTADO PARA EL FRONTEND
                     'tipo' => 'AUSENCIA',
                     'detalle' => ucfirst(str_replace('_', ' ', $a->tipo)),
                     'estilo' => 'ausencia'
@@ -71,13 +75,22 @@ class CalendarioGlobalController extends Controller
         }
 
         // 3. RECUPERAR MÉDICOS DEL DEPARTAMENTO PARA EL SELECTOR
+        // Cargamos los roles y mapeamos para tener un array limpio en Vue
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
             ->whereDoesntHave('roles', fn($q) => $q->where('name', 'SuperAdmin'))
-            ->get(['id', 'name']);
+            ->with('roles')
+            ->get(['id', 'name'])
+            ->map(function ($m) {
+                return [
+                    'id' => $m->id,
+                    'name' => $m->name,
+                    'rol' => $m->roles->first()?->name ?? 'Facultativo'
+                ];
+            });
 
         return Inertia::render('CalendarioGlobal/Index', [
             'eventos' => $streamEventos,
-            'medicos' => $medicos, // NUEVA PROP PASADA A VUE
+            'medicos' => $medicos, 
             'mes_actual' => (int)$mes,
             'anio_actual' => (int)$anio
         ]);

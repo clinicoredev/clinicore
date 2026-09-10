@@ -4,7 +4,7 @@ import { usePage, Link, router } from '@inertiajs/vue3';
 import { 
     LayoutDashboard, CalendarDays, Users, LogOut, 
     Activity, CalendarClock, Layers, Building2, ShieldAlert,
-    Menu, X, Bell // Añadimos los iconos para el menú móvil
+    Menu, X, Bell, GraduationCap, UserCog // Añadimos los iconos para el menú móvil
 } from '@lucide/vue';
 
 const page = usePage();
@@ -22,15 +22,19 @@ const menuNavegacion = computed(() => {
             { name: 'Consola Global SaaS', href: '/dashboard', icon: LayoutDashboard },
             { name: 'Fábrica de Tenants', href: '/admin/tenants', icon: Building2 },
             { name: 'Registro de Auditoría', href: '/auditoria', icon: ShieldAlert },
+            // Puedes añadirlo aquí también si quieres que el SuperAdmin tenga acceso directo a su perfil
+            { name: 'Mi Perfil', href: '/settings/profile', icon: UserCog }, 
         ];
     }
 
     return [
         { name: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
         { name: 'Calendario Completo', href: '/calendario-completo', icon: Layers },
-        { name: 'Guardias y Turnos', href: '/guardias', icon: CalendarDays },
+        { name: 'Guardias Adjuntos', href: '/guardias', icon: CalendarDays },
+        { name: 'Guardias Residentes', href: '/residentes/guardias', icon: GraduationCap },
         { name: 'Directorio Facultativo', href: '/personal', icon: Users },
         { name: 'Permisos y Ausencias', href: '/ausencias', icon: CalendarClock },
+        { name: 'Ajustes de Perfil', href: '/settings/profile', icon: UserCog },
     ];
 });
 
