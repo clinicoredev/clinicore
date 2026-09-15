@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue';
-import { Head, useForm, router } from '@inertiajs/vue3';
+import { Head, useForm, router, usePage } from '@inertiajs/vue3';
 import { 
     CalendarDays, Cpu, ShieldAlert, Trash2, Ban, 
     Sparkles, User, CheckCircle2, BarChart3, X, ArrowLeftRight, Pin, ChevronLeft, ChevronRight, Settings2, Sliders, Moon
@@ -16,6 +16,7 @@ const props = defineProps({
     anio_actual: Number
 });
 
+const page = usePage();
 const pestanaActual = ref('cuadrante');
 
 // =========================================================================
@@ -52,20 +53,13 @@ const mesSiguiente = () => {
 // SEPARACIÓN Y FILTRADO DE REGLAS
 // =========================================================================
 const limitacionesRecurrentes = computed(() => {
-    return props.limitaciones.filter(l => !l.regla.includes('/'));
+    return props.limitaciones.filter(l => l.tipo_raw === 'dia_semana');
 });
 
 const limitacionesMensuales = computed(() => {
     return props.limitaciones.filter(l => {
-        if (!l.regla.includes('/')) return false;
-        
-        const partes = l.regla.split('/');
-        if (partes.length === 3) {
-            const mesRegla = parseInt(partes[1], 10);
-            const anioRegla = parseInt(partes[2], 10);
-            return mesRegla === mesFiltro.value && anioRegla === anioFiltro.value;
-        }
-        return false;
+        if (l.tipo_raw === 'dia_semana') return false; 
+        return true; 
     });
 });
 
@@ -122,7 +116,7 @@ const nuclearVaciarMes = () => {
 const formGenerador = useForm({
     mes: mesFiltro.value,
     anio: anioFiltro.value,
-    personas_por_dia: 1, // Habilita el solapamiento de adjuntos
+    personas_por_dia: 1, 
     usar_plantilla_completa: true,
     medicos_incluidos: props.medicos.map(m => m.id),
     respetar_salientes: true,
@@ -150,6 +144,8 @@ const formLimitacion = useForm({
     user_id: props.medicos[0]?.id ?? '',
     tipo: 'dia_semana',
     valor: '1',
+    fecha_inicio: '',
+    fecha_fin: '',
     motivo: ''
 });
 
@@ -159,8 +155,18 @@ const formManual = useForm({
     tipo: 'diaria_17h'
 });
 
-const guardarRegla = () => { formLimitacion.post('/guardias/limitaciones', { onSuccess: () => formLimitacion.reset('motivo') }); };
-const guardarGuardiaManual = () => { formManual.post('/guardias/manual', { preserveScroll: true, onSuccess: () => formManual.reset('user_id', 'fecha') }); };
+const guardarRegla = () => { 
+    formLimitacion.post('/guardias/limitaciones', { 
+        onSuccess: () => formLimitacion.reset('motivo', 'fecha_inicio', 'fecha_fin') 
+    }); 
+};
+
+const guardarGuardiaManual = () => { 
+    formManual.post('/guardias/manual', { 
+        preserveScroll: true, 
+        onSuccess: () => formManual.reset('user_id', 'fecha') 
+    }); 
+};
 
 // =========================================================================
 // ASIGNACIÓN RÁPIDA (MODAL)
@@ -258,6 +264,18 @@ const diasMatriz = computed(() => {
 
     <div class="space-y-4 sm:space-y-6 relative max-w-full overflow-hidden">
         
+        <!-- ALERTA DE CONFLICTO / ERROR DE PERMUTA / MANUAL -->
+        <div v-if="$page.props.errors.conflicto" class="p-4 bg-rose-500/20 border-2 border-rose-500/50 rounded-xl sm:rounded-2xl flex items-center gap-3 text-rose-200 animate-in fade-in zoom-in">
+            <ShieldAlert class="w-6 h-6 text-rose-400 shrink-0" />
+            <div>
+                <span class="font-bold text-rose-400 uppercase text-[10px] sm:text-xs tracking-wider block">Bloqueo de Seguridad</span>
+                <p class="text-xs sm:text-sm font-medium mt-0.5">{{ $page.props.errors.conflicto }}</p>
+            </div>
+            <button @click="$page.props.errors.conflicto = null" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer transition-colors">
+                <X class="w-5 h-5"/>
+            </button>
+        </div>
+
         <div v-if="guardiaOrigen" class="p-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl sm:rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-3 shadow-lg animate-bounce">
             <div class="flex items-center gap-3 text-xs">
                 <ArrowLeftRight class="w-5 h-5 animate-pulse shrink-0" />
@@ -281,12 +299,12 @@ const diasMatriz = computed(() => {
                 </div>
 
                 <div v-if="permisos.es_jefe" class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 shrink-0">
-                    <button @click="nuclearVaciarMes" class="px-4 py-2.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 transition-all font-bold text-xs sm:text-sm flex justify-center items-center gap-2">
+                    <button @click="nuclearVaciarMes" class="px-4 py-2.5 rounded-lg border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 transition-all font-bold text-xs sm:text-sm flex justify-center items-center gap-2 cursor-pointer">
                         <Trash2 class="w-4 h-4" /> Limpiar
                     </button>
                     <button @click="dispararAlgoritmo" :disabled="formGenerador.processing" class="px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs sm:text-sm transition-all shadow-lg flex justify-center items-center gap-2 disabled:opacity-50 cursor-pointer">
                         <Sparkles class="w-4 h-4 fill-zinc-950" />
-                        {{ formGenerador.processing ? 'Resolviendo...' : 'Generar' }}
+                        {{ formGenerador.processing ? 'Resolviendo...' : 'Generar IA' }}
                     </button>
                     <div class="flex items-center gap-2">
                         <a :href="`/guardias/exportar/excel?mes=${mesFiltro}&anio=${anioFiltro}`" class="flex-1 text-center px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold text-xs border border-emerald-500/30">📊 Excel</a>
@@ -307,7 +325,7 @@ const diasMatriz = computed(() => {
                 </div>
 
                 <div v-if="!formGenerador.usar_plantilla_completa" class="pt-1 pb-3 border-b border-zinc-800/60 animate-in fade-in">
-                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Facultativos incluidos:</span>
+                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Facultativos incluidos en esta corrida:</span>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                         <label v-for="m in medicos" :key="m.id" class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors" :class="formGenerador.medicos_incluidos.includes(m.id) ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500'">
                             <input type="checkbox" :value="m.id" v-model="formGenerador.medicos_incluidos" class="hidden">
@@ -326,7 +344,7 @@ const diasMatriz = computed(() => {
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
                             <label class="block text-xs font-bold text-white mb-1">Facultativos Simultáneos</label>
                             <div class="flex items-center gap-2">
-                                <input type="number" min="1" max="10" v-model="formGenerador.personas_por_dia" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono">
+                                <input type="number" min="1" max="10" v-model="formGenerador.personas_por_dia" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
                                 <span class="text-[10px] text-zinc-500">(Puestos a cubrir por día)</span>
                             </div>
                         </div>
@@ -340,7 +358,7 @@ const diasMatriz = computed(() => {
                             </label>
                             <div v-if="formGenerador.respetar_salientes" class="pl-6 text-[11px] text-zinc-400 flex items-center gap-2">
                                 <span>Separación:</span>
-                                <select v-model="formGenerador.distancia_minima_dias" class="bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold">
+                                <select v-model="formGenerador.distancia_minima_dias" class="bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-emerald-500">
                                     <option :value="1">24h (1 día libre)</option>
                                     <option :value="2">48h (2 días libres)</option>
                                     <option :value="3">72h (3 días libres)</option>
@@ -351,7 +369,7 @@ const diasMatriz = computed(() => {
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
                             <label class="block text-xs font-bold text-white mb-1">Max Guardias / Facultativo / Mes</label>
                             <div class="flex items-center gap-2">
-                                <input type="number" min="0" max="15" v-model="formGenerador.max_guardias_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono">
+                                <input type="number" min="0" max="15" v-model="formGenerador.max_guardias_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
                                 <span class="text-[10px] text-zinc-500">(0 = Sin límite)</span>
                             </div>
                         </div>
@@ -359,7 +377,7 @@ const diasMatriz = computed(() => {
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
                             <label class="block text-xs font-bold text-white mb-1">Max Findes / Facultativo / Mes</label>
                             <div class="flex items-center gap-2">
-                                <input type="number" min="0" max="5" v-model="formGenerador.max_findes_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono">
+                                <input type="number" min="0" max="5" v-model="formGenerador.max_findes_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
                                 <span class="text-[10px] text-zinc-500">(0 = Sin límite)</span>
                             </div>
                         </div>
@@ -380,33 +398,25 @@ const diasMatriz = computed(() => {
             </div>
         </div>
 
-        <div v-if="formGenerador.errors.algoritmo" class="p-4 sm:p-5 rounded-xl sm:rounded-2xl bg-rose-500/20 border-2 border-rose-500/50 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 text-rose-200">
-            <ShieldAlert class="w-6 h-6 sm:w-8 sm:h-8 text-rose-400 shrink-0" />
-            <div>
-                <span class="font-bold text-rose-400 uppercase text-[10px] sm:text-xs tracking-wider block">Fallo de Satisfacción de Restricciones</span>
-                <p class="text-xs sm:text-sm font-mono mt-0.5">{{ formGenerador.errors.algoritmo }}</p>
-            </div>
-        </div>
-
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-zinc-900 border border-zinc-800 p-2 rounded-xl shadow-sm gap-3">
             <div class="flex items-center justify-center sm:justify-start gap-2 px-2 text-zinc-400 font-bold text-[11px] sm:text-sm uppercase tracking-wider">
                 <CalendarDays class="w-4 h-4 text-emerald-400" /> Consultando periodo:
             </div>
             
             <div class="flex items-center justify-center gap-1 w-full sm:w-auto">
-                <button @click="mesAnterior" class="p-2 sm:p-2.5 bg-zinc-950 text-zinc-400 rounded-lg border border-zinc-800 flex-1 sm:flex-none flex justify-center">
+                <button @click="mesAnterior" class="p-2 sm:p-2.5 bg-zinc-950 text-zinc-400 rounded-lg border border-zinc-800 flex-1 sm:flex-none flex justify-center cursor-pointer">
                     <ChevronLeft class="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
-                <select v-model="mesFiltro" @change="navegarMes" class="bg-zinc-950 text-emerald-400 font-bold text-xs sm:text-sm rounded-lg border-zinc-800 px-2 py-2 sm:px-3 text-center appearance-none">
+                <select v-model="mesFiltro" @change="navegarMes" class="bg-zinc-950 text-emerald-400 font-bold text-xs sm:text-sm rounded-lg border-zinc-800 px-2 py-2 sm:px-3 text-center appearance-none outline-none">
                     <option :value="1">Ene</option><option :value="2">Feb</option><option :value="3">Mar</option>
                     <option :value="4">Abr</option><option :value="5">May</option><option :value="6">Jun</option>
                     <option :value="7">Jul</option><option :value="8">Ago</option><option :value="9">Sep</option>
                     <option :value="10">Oct</option><option :value="11">Nov</option><option :value="12">Dic</option>
                 </select>
-                <select v-model="anioFiltro" @change="navegarMes" class="bg-zinc-950 text-emerald-400 font-bold text-xs sm:text-sm rounded-lg border-zinc-800 px-2 py-2 sm:px-3 text-center appearance-none">
+                <select v-model="anioFiltro" @change="navegarMes" class="bg-zinc-950 text-emerald-400 font-bold text-xs sm:text-sm rounded-lg border-zinc-800 px-2 py-2 sm:px-3 text-center appearance-none outline-none">
                     <option v-for="a in aniosDisponibles" :key="a" :value="a">{{ a }}</option>
                 </select>
-                <button @click="mesSiguiente" class="p-2 sm:p-2.5 bg-zinc-950 text-zinc-400 rounded-lg border border-zinc-800 flex-1 sm:flex-none flex justify-center">
+                <button @click="mesSiguiente" class="p-2 sm:p-2.5 bg-zinc-950 text-zinc-400 rounded-lg border border-zinc-800 flex-1 sm:flex-none flex justify-center cursor-pointer">
                     <ChevronRight class="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
             </div>
@@ -526,14 +536,54 @@ const diasMatriz = computed(() => {
         <div v-if="pestanaActual === 'reglas'" class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 animate-in fade-in duration-200">
             
             <div v-if="permisos.es_jefe" class="p-4 sm:p-6 bg-zinc-900 border border-zinc-800 rounded-xl h-fit">
-                <h3 class="font-bold text-white text-sm sm:text-base flex items-center gap-2 mb-4"><Ban class="w-4 h-4 text-rose-400" /> Añadir veto</h3>
+                <h3 class="font-bold text-white text-sm sm:text-base flex items-center gap-2 mb-4"><Ban class="w-4 h-4 text-rose-400" /> Añadir veto o restricción</h3>
                 <form @submit.prevent="guardarRegla" class="space-y-4 text-xs">
-                    <select v-model="formLimitacion.user_id" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5"><option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option></select>
-                    <select v-model="formLimitacion.tipo" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5"><option value="dia_semana">Día semana</option><option value="fecha_concreta">Día exacto</option></select>
-                    <div v-if="formLimitacion.tipo === 'dia_semana'"><select v-model="formLimitacion.valor" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5"><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="7">Domingo</option></select></div>
-                    <div v-else><input v-model="formLimitacion.valor" type="date" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5" /></div>
-                    <input v-model="formLimitacion.motivo" type="text" placeholder="Ej: Conciliación" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5" />
-                    <button type="submit" class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded-lg transition-colors cursor-pointer">Registrar</button>
+                    <div>
+                        <label class="block text-[10px] text-zinc-500 uppercase mb-1 font-bold">Facultativo implicado</label>
+                        <select v-model="formLimitacion.user_id" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 outline-none focus:border-emerald-500">
+                            <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] text-zinc-500 uppercase mb-1 font-bold">Tipo de Regla</label>
+                        <select v-model="formLimitacion.tipo" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 outline-none focus:border-emerald-500">
+                            <option value="dia_semana">Día semana (recurrente)</option>
+                            <option value="fecha_concreta">Día exacto</option>
+                            <option value="periodo">Rango de días</option>
+                        </select>
+                    </div>
+
+                    <!-- Input Dinámico según Selección -->
+                    <div v-if="formLimitacion.tipo === 'dia_semana'">
+                        <select v-model="formLimitacion.valor" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 outline-none focus:border-emerald-500">
+                            <option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="7">Domingo</option>
+                        </select>
+                    </div>
+                    
+                    <div v-else-if="formLimitacion.tipo === 'fecha_concreta'">
+                        <input v-model="formLimitacion.valor" type="date" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 font-mono outline-none focus:border-emerald-500" />
+                    </div>
+
+                    <div v-else-if="formLimitacion.tipo === 'periodo'" class="grid grid-cols-2 gap-2">
+                        <div>
+                            <span class="block text-[9px] text-zinc-500 mb-0.5">Desde</span>
+                            <input v-model="formLimitacion.fecha_inicio" type="date" required class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 font-mono outline-none focus:border-emerald-500" />
+                        </div>
+                        <div>
+                            <span class="block text-[9px] text-zinc-500 mb-0.5">Hasta</span>
+                            <input v-model="formLimitacion.fecha_fin" type="date" required class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 font-mono outline-none focus:border-emerald-500" />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] text-zinc-500 uppercase mb-1 font-bold">Justificación (Opcional)</label>
+                        <input v-model="formLimitacion.motivo" type="text" placeholder="Ej: Reducción de jornada" class="w-full bg-zinc-950 text-white rounded-lg border-zinc-800 p-2.5 outline-none focus:border-emerald-500" />
+                    </div>
+
+                    <button type="submit" :disabled="formLimitacion.processing" class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded-lg transition-colors cursor-pointer mt-2 disabled:opacity-50">
+                        Registrar Regla
+                    </button>
                 </form>
             </div>
 
@@ -549,23 +599,30 @@ const diasMatriz = computed(() => {
                     </div>
                     <div v-else class="space-y-3">
                         <div v-for="regla in limitacionesRecurrentes" :key="regla.id" class="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center text-xs sm:text-sm gap-2">
-                            <div><span class="text-emerald-400 font-bold">{{ regla.medico }}</span> <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span></div>
+                            <div>
+                                <span class="text-emerald-400 font-bold">{{ regla.medico }}</span> 
+                                <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span>
+                            </div>
                             <button v-if="permisos.es_jefe" @click="router.delete(`/guardias/limitaciones/${regla.id}`)" class="text-rose-400 bg-rose-500/10 p-1.5 rounded self-end sm:self-auto cursor-pointer"><Trash2 class="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Sección 2: Reglas Mensuales (Filtradas por la fecha que estás viendo) -->
+                <!-- Sección 2: Reglas Mensuales y Periodos -->
                 <div>
                     <h3 class="font-bold text-white mb-4 text-sm sm:text-base flex items-center gap-2">
-                        <CalendarDays class="w-4 h-4 text-amber-400" /> Días Exactos (Mes Actual)
+                        <CalendarDays class="w-4 h-4 text-amber-400" /> Días Exactos y Periodos
                     </h3>
                     <div v-if="limitacionesMensuales.length === 0" class="text-xs text-zinc-500 italic p-4 text-center border border-dashed border-zinc-800 rounded-lg">
-                        Ninguna restricción puntual registrada para este mes.
+                        Ninguna restricción puntual o de rango registrada.
                     </div>
                     <div v-else class="space-y-3">
                         <div v-for="regla in limitacionesMensuales" :key="regla.id" class="p-3 bg-zinc-950 rounded-lg border border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center text-xs sm:text-sm gap-2">
-                            <div><span class="text-emerald-400 font-bold">{{ regla.medico }}</span> <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span></div>
+                            <div>
+                                <span class="text-emerald-400 font-bold">{{ regla.medico }}</span> 
+                                <span class="text-zinc-400 ml-1">prohibido: <u class="text-zinc-200 font-mono bg-zinc-900 px-1 py-0.5 rounded">{{ regla.regla }}</u></span>
+                                <span v-if="regla.motivo" class="block text-[10px] text-zinc-500 mt-1 italic">"{{ regla.motivo }}"</span>
+                            </div>
                             <button v-if="permisos.es_jefe" @click="router.delete(`/guardias/limitaciones/${regla.id}`)" class="text-rose-400 bg-rose-500/10 p-1.5 rounded self-end sm:self-auto cursor-pointer"><Trash2 class="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
@@ -576,10 +633,18 @@ const diasMatriz = computed(() => {
 
         <div v-if="pestanaActual === 'manual' && permisos.es_jefe" class="max-w-md w-full bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-800 mx-auto animate-in fade-in">
             <form @submit.prevent="guardarGuardiaManual" class="space-y-4">
-                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm"><option value="" disabled selected>Facultativo...</option><option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option></select>
-                <input v-model="formManual.fecha" required type="date" class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 font-mono text-xs sm:text-sm" />
-                <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm"><option value="diaria_17h">Diario (17h)</option><option value="festivo_24h">Festivo (24h)</option></select>
-                <button type="submit" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center gap-2 cursor-pointer"><Pin class="w-4 h-4" /> Fijar Turno</button>
+                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
+                    <option value="" disabled selected>Facultativo...</option>
+                    <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>
+                </select>
+                <input v-model="formManual.fecha" required type="date" class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 font-mono text-xs sm:text-sm outline-none" />
+                <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
+                    <option value="diaria_17h">Diario (17h)</option>
+                    <option value="festivo_24h">Festivo (24h)</option>
+                </select>
+                <button type="submit" :disabled="formManual.processing" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center gap-2 cursor-pointer disabled:opacity-50">
+                    <Pin class="w-4 h-4" /> Fijar Turno
+                </button>
             </form>
         </div>
 
@@ -597,14 +662,14 @@ const diasMatriz = computed(() => {
                     <form @submit.prevent="guardarGuardiaDesdeCalendario" class="space-y-4">
                         <div>
                             <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Facultativo Asignado</label>
-                            <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm">
+                            <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
                                 <option value="" disabled selected>Selecciona un facultativo...</option>
                                 <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>
                             </select>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Tipo de Guardia</label>
-                            <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm">
+                            <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
                                 <option value="diaria_17h">Diario (17h)</option>
                                 <option value="festivo_24h">Festivo (24h)</option>
                             </select>
@@ -613,7 +678,7 @@ const diasMatriz = computed(() => {
                             <button type="button" @click="modalAsignacionAbierto = false" class="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold rounded-xl text-xs transition-colors cursor-pointer">
                                 Cancelar
                             </button>
-                            <button type="submit" class="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center items-center gap-2 transition-colors cursor-pointer">
+                            <button type="submit" :disabled="formManual.processing" class="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center items-center gap-2 transition-colors cursor-pointer disabled:opacity-50">
                                 <Pin class="w-4 h-4" /> Fijar Turno
                             </button>
                         </div>

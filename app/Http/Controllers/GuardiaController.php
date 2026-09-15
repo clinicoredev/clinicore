@@ -16,6 +16,39 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class GuardiaController extends Controller
 {
+    // ====================================================================
+    // FUNCIÓN DE VALIDACIÓN GLOBAL DE CONFLICTOS (Ausencias y Reglas)
+    // ====================================================================
+    private function checkConflict($userId, $fechaStr) 
+    {
+        $fecha = Carbon::parse($fechaStr);
+        
+        $ausencia = Ausencia::where('user_id', $userId)
+            ->where('estado', 'aprobada')
+            ->where('fecha_inicio', '<=', $fecha->format('Y-m-d'))
+            ->where('fecha_fin', '>=', $fecha->format('Y-m-d'))
+            ->exists();
+        if ($ausencia) return "El facultativo está ausente, de baja o de vacaciones este día.";
+        
+        $limites = LimitacionGuardia::where('user_id', $userId)->get();
+        foreach ($limites as $l) {
+            if ($l->tipo === 'dia_semana' && (int)$fecha->dayOfWeekIso === (int)$l->valor) {
+                return "Entra en conflicto con una regla de día de la semana recurrente.";
+            }
+            if ($l->tipo === 'fecha_concreta' && $fecha->format('Y-m-d') === $l->valor) {
+                return "El facultativo tiene un veto exacto configurado para este día.";
+            }
+            if ($l->tipo === 'periodo') {
+                $parts = explode(',', $l->valor);
+                if (count($parts) === 2 && $fecha->between(Carbon::parse($parts[0])->startOfDay(), Carbon::parse($parts[1])->endOfDay())) {
+                    return "Entra en conflicto con un periodo/rango de fechas bloqueado.";
+                }
+            }
+        }
+        
+        return null;
+    }
+
     public function index(Request $request)
     {
         $usuario = $request->user();
@@ -31,7 +64,7 @@ class GuardiaController extends Controller
         $idsAdjuntos = $medicos->pluck('id')->toArray();
 
         // 2. GUARDIAS: Aislamiento estricto por especialidad_id y IDs de Adjuntos
-        $guardias = \App\Models\Guardia::where('especialidad_id', $usuario->especialidad_id)
+        $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->with('facultativo') 
             ->whereMonth('fecha', $mes)
@@ -60,12 +93,21 @@ class GuardiaController extends Controller
             ->map(function ($l) {
                 $mapaDias = [1 => 'Lunes', 2 => 'Martes', 3 => 'Miércoles', 4 => 'Jueves', 5 => 'Viernes', 6 => 'Sábado', 7 => 'Domingo'];
                 
+                $reglaLegible = '';
+                if ($l->tipo === 'dia_semana') {
+                    $reglaLegible = 'Los ' . ($mapaDias[(int)$l->valor] ?? $l->valor);
+                } elseif ($l->tipo === 'fecha_concreta') {
+                    $reglaLegible = Carbon::parse($l->valor)->format('d/m/Y');
+                } elseif ($l->tipo === 'periodo') {
+                    $parts = explode(',', $l->valor);
+                    $reglaLegible = count($parts) === 2 ? 'Del ' . Carbon::parse($parts[0])->format('d/m/Y') . ' al ' . Carbon::parse($parts[1])->format('d/m/Y') : 'Rango inválido';
+                }
+
                 return [
                     'id' => $l->id,
                     'medico' => $l->facultativo ? $l->facultativo->name : 'Usuario borrado', 
-                    'regla' => $l->tipo === 'dia_semana' 
-                        ? 'Los ' . ($mapaDias[(int)$l->valor] ?? $l->valor) 
-                        : Carbon::parse($l->valor)->format('d/m/Y'),
+                    'regla' => $reglaLegible,
+                    'tipo_raw' => $l->tipo,
                     'motivo' => $l->motivo ?: 'Sin motivo especificado'
                 ];
             });
@@ -95,16 +137,23 @@ class GuardiaController extends Controller
     {
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'tipo' => 'required|in:dia_semana,fecha_concreta',
-            'valor' => 'required|string',
+            'tipo' => 'required|in:dia_semana,fecha_concreta,periodo',
+            'valor' => 'nullable|string',
+            'fecha_inicio' => 'nullable|date',
+            'fecha_fin' => 'nullable|date|after_or_equal:fecha_inicio',
             'motivo' => 'nullable|string|max:100'
         ]);
+
+        $valorFinal = $validated['valor'];
+        if ($validated['tipo'] === 'periodo') {
+            $valorFinal = $validated['fecha_inicio'] . ',' . $validated['fecha_fin'];
+        }
 
         LimitacionGuardia::create([
             'especialidad_id' => $request->user()->especialidad_id,
             'user_id' => $validated['user_id'],
             'tipo' => $validated['tipo'],
-            'valor' => $validated['valor'],
+            'valor' => $valorFinal,
             'motivo' => $validated['motivo']
         ]);
 
@@ -127,15 +176,19 @@ class GuardiaController extends Controller
             'tipo' => 'required|in:diaria_17h,festivo_24h'
         ]);
 
+        // VERIFICACIÓN DE CONFLICTOS
+        if ($conflicto = $this->checkConflict($request->user_id, $request->fecha)) {
+            return back()->withErrors(['conflicto' => "Operación denegada: " . $conflicto]);
+        }
+
         $jefe = $request->user();
 
-        // Borra la guardia de este usuario en esta fecha antes de crearla
-        \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+        Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->where('fecha', $request->fecha)
             ->where('user_id', $request->user_id)
             ->delete();
 
-        \App\Models\Guardia::create([
+        Guardia::create([
             'especialidad_id' => $jefe->especialidad_id,
             'user_id' => $request->user_id,
             'fecha' => $request->fecha,
@@ -148,6 +201,41 @@ class GuardiaController extends Controller
         return back()->with('success', 'Guardia manual consolidada correctamente.');
     }
 
+    public function permutar(Request $request)
+    {
+        $request->validate([
+            'origen_id' => 'required|exists:guardias,id',
+            'destino_id' => 'required|exists:guardias,id',
+        ]);
+
+        $guardia1 = Guardia::find($request->origen_id);
+        $guardia2 = Guardia::find($request->destino_id);
+
+        if ($guardia1->especialidad_id !== $request->user()->especialidad_id || $guardia2->especialidad_id !== $request->user()->especialidad_id) {
+            abort(403);
+        }
+
+        // VERIFICACIÓN CRUZADA DE CONFLICTOS ANTES DE PERMUTAR
+        if ($conflicto1 = $this->checkConflict($guardia1->user_id, $guardia2->fecha)) {
+            return back()->withErrors(['conflicto' => "Permuta denegada para {$guardia1->facultativo->name}: " . $conflicto1]);
+        }
+        if ($conflicto2 = $this->checkConflict($guardia2->user_id, $guardia1->fecha)) {
+            return back()->withErrors(['conflicto' => "Permuta denegada para {$guardia2->facultativo->name}: " . $conflicto2]);
+        }
+
+        $tempUserId = $guardia1->user_id;
+        $guardia1->user_id = $guardia2->user_id;
+        $guardia2->user_id = $tempUserId;
+        
+        $guardia1->is_manual = true;
+        $guardia2->is_manual = true;
+
+        $guardia1->save();
+        $guardia2->save();
+
+        return back()->with('success', 'Permuta realizada: Turnos intercambiados con éxito.');
+    }
+
     public function generarAlgoritmo(Request $request)
     {
         if (!$request->user()->hasRole('Jefe de Servicio')) abort(403);
@@ -155,7 +243,7 @@ class GuardiaController extends Controller
         $request->validate([
             'mes' => 'required|integer|between:1,12', 
             'anio' => 'required|integer', 
-            'personas_por_dia' => 'required|integer|min:1|max:10', // Añadido soporte de solapamiento
+            'personas_por_dia' => 'required|integer|min:1|max:10', 
             'medicos_incluidos' => 'nullable|array',
             'respetar_salientes' => 'boolean',
             'distancia_minima_dias' => 'nullable|integer|min:1|max:5',
@@ -188,7 +276,7 @@ class GuardiaController extends Controller
             ->get();
 
         if ($medicos->count() < $personasPorDia) {
-            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos para cubrir los puestos.']);
+            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos para cubrir los puestos simultáneos configurados.']);
         }
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
@@ -208,7 +296,7 @@ class GuardiaController extends Controller
             ->whereIn('user_id', $idsAdjuntos)
             ->get();
 
-        $guardiasManuales = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+        $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
             ->where('is_manual', true)
@@ -225,6 +313,15 @@ class GuardiaController extends Controller
             }
             foreach($limitaciones->where('user_id', $m->id) as $l) {
                 if($l->tipo === 'dia_semana') $diasDisponibles -= 4; 
+                // Añadido descuento de dias si es un periodo entero
+                if($l->tipo === 'periodo') {
+                    $parts = explode(',', $l->valor);
+                    if(count($parts) === 2) {
+                        $inicioL = Carbon::parse($parts[0])->max($inicioMes);
+                        $finL = Carbon::parse($parts[1])->min($finMes);
+                        if ($inicioL <= $finL) $diasDisponibles -= $inicioL->diffInDays($finL) + 1;
+                    }
+                }
             }
 
             $stats[$m->id] = [
@@ -241,7 +338,7 @@ class GuardiaController extends Controller
 
         if ($usarMemoriaAnual) {
             $inicioAnio = Carbon::createFromDate($anio, 1, 1)->startOfDay();
-            $historico = \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+            $historico = Guardia::where('especialidad_id', $jefe->especialidad_id)
                 ->whereIn('user_id', $idsAdjuntos)
                 ->whereBetween('fecha', [$inicioAnio, $inicioMes->copy()->subDay()->endOfDay()])
                 ->get();
@@ -309,6 +406,13 @@ class GuardiaController extends Controller
                 if ($l->user_id == $medicoId) {
                     if ($l->tipo === 'dia_semana' && (int)$fecha->dayOfWeekIso === (int)$l->valor) return false;
                     if ($l->tipo === 'fecha_concreta' && $fecha->format('Y-m-d') === $l->valor) return false;
+                    // REGLA PARA PERIODO
+                    if ($l->tipo === 'periodo') {
+                        $parts = explode(',', $l->valor);
+                        if (count($parts) === 2 && $fecha->between(Carbon::parse($parts[0])->startOfDay(), Carbon::parse($parts[1])->endOfDay())) {
+                            return false;
+                        }
+                    }
                 }
             }
 
@@ -377,15 +481,14 @@ class GuardiaController extends Controller
             }
         }
 
-        // Transacción de guardado
         \Illuminate\Support\Facades\DB::transaction(function() use ($jefe, $mes, $anio, $idsAdjuntos, $guardiasAInsertar) {
-            \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+            Guardia::where('especialidad_id', $jefe->especialidad_id)
                 ->whereIn('user_id', $idsAdjuntos)
                 ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
                 ->where('is_manual', false)
                 ->delete();
                 
-            \App\Models\Guardia::insert($guardiasAInsertar);
+            Guardia::insert($guardiasAInsertar);
         });
 
         return back()->with('success', 'Cuadrante generado respetando las reglas de salud laboral.');
@@ -401,7 +504,7 @@ class GuardiaController extends Controller
             ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
             ->pluck('id')->toArray();
 
-        \App\Models\Guardia::where('especialidad_id', $jefe->especialidad_id)
+        Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->whereMonth('fecha', $request->mes)
             ->whereYear('fecha', $request->anio)
@@ -427,39 +530,13 @@ class GuardiaController extends Controller
             ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
             ->pluck('id')->toArray();
 
-        \App\Models\Guardia::where('especialidad_id', $request->user()->especialidad_id)
+        Guardia::where('especialidad_id', $request->user()->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->whereMonth('fecha', $request->mes)
             ->whereYear('fecha', $request->anio)
             ->delete();
 
         return back()->with('success', 'Calendario del mes reseteado por completo.');
-    }
-
-    public function permutar(Request $request)
-    {
-        $request->validate([
-            'origen_id' => 'required|exists:guardias,id',
-            'destino_id' => 'required|exists:guardias,id',
-        ]);
-
-        $guardia1 = \App\Models\Guardia::find($request->origen_id);
-        $guardia2 = \App\Models\Guardia::find($request->destino_id);
-
-        if ($guardia1->especialidad_id !== $request->user()->especialidad_id || $guardia2->especialidad_id !== $request->user()->especialidad_id) {
-            abort(403);
-        }
-
-        $tempUserId = $guardia1->user_id;
-        $guardia1->user_id = $guardia2->user_id;
-        $guardia2->user_id = $tempUserId;
-        $guardia1->is_manual = true;
-        $guardia2->is_manual = true;
-
-        $guardia1->save();
-        $guardia2->save();
-
-        return back()->with('success', 'Permuta realizada: Turnos intercambiados con éxito.');
     }
 
     public function exportarExcel(Request $request)
@@ -482,7 +559,7 @@ class GuardiaController extends Controller
             ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
             ->pluck('id')->toArray();
 
-        $guardias = \App\Models\Guardia::where('especialidad_id', $usuario->especialidad_id)
+        $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->with('facultativo')
             ->whereMonth('fecha', $mes)
