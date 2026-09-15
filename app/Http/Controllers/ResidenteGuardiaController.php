@@ -61,7 +61,7 @@ class ResidenteGuardiaController extends Controller
         // 1. MÉDICOS (DESPLEGABLES): Solo del Tenant actual y con rol Residente
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
             ->whereHas('roles', function ($query) {
-                $query->whereIn('name', 'Residente', 'Admin de Residentes');
+                $query->whereIn('name', ['Residente', 'Admin de Residentes']);
             })
             ->get();
 
@@ -273,7 +273,7 @@ class ResidenteGuardiaController extends Controller
         // 1. Cargamos médicos filtrados por el rol Residente
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
             ->whereHas('roles', function ($query) {
-                $query->whereIn('name', 'Residente', 'Admin de Residentes');
+                $query->whereIn('name', ['Residente', 'Admin de Residentes']);
             })
             ->when($request->has('medicos_incluidos'), function ($query) use ($request) {
                 $query->whereIn('id', $request->input('medicos_incluidos'));
@@ -509,7 +509,7 @@ class ResidenteGuardiaController extends Controller
         $jefe = $request->user();
 
         // Borra solo las guardias de residentes del mes seleccionado
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', 'Residente', 'Admin de Residentes'))->pluck('id')->toArray();
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
         Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereIn('user_id', $idsResidentes)
             ->whereMonth('fecha', $request->mes)
@@ -532,7 +532,7 @@ class ResidenteGuardiaController extends Controller
     public function vaciarMes(Request $request)
     {
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', 'Residente', 'Admin de Residentes'))->pluck('id')->toArray();
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
 
         Guardia::where('especialidad_id', $request->user()->especialidad_id)
             ->whereIn('user_id', $idsResidentes)
@@ -558,7 +558,7 @@ class ResidenteGuardiaController extends Controller
         $anio = $request->query('anio', now()->year);
         $usuario = $request->user();
 
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', 'Residente', 'Admin de Residentes'))->pluck('id')->toArray();
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
 
         $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsResidentes)
