@@ -65,7 +65,6 @@ const limitacionesMensuales = computed(() => {
 
 const totalReglasVisibles = computed(() => limitacionesRecurrentes.value.length + limitacionesMensuales.value.length);
 
-
 // =========================================================================
 // MÁQUINA DE ESTADOS: PERMUTA PRO
 // =========================================================================
@@ -122,7 +121,9 @@ const formGenerador = useForm({
     respetar_salientes: true,
     distancia_minima_dias: 2, 
     max_guardias_mes: 0,      
-    max_findes_mes: 0,        
+    max_findes_mes: 0,  
+    max_diarias_mes: 0,
+    prorratear_ausencias: true,      
     usar_memoria_anual: true  
 });
 
@@ -339,13 +340,13 @@ const diasMatriz = computed(() => {
                     <span class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                         <Sliders class="w-3.5 h-3.5" /> Reglas y Parámetros del Algoritmo:
                     </span>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-xs font-bold text-white mb-1">Facultativos Simultáneos</label>
+                            <label class="block text-xs font-bold text-white mb-1">Simultáneos</label>
                             <div class="flex items-center gap-2">
                                 <input type="number" min="1" max="10" v-model="formGenerador.personas_por_dia" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
-                                <span class="text-[10px] text-zinc-500">(Puestos a cubrir por día)</span>
+                                <span class="text-[10px] text-zinc-500">(Puestos / día)</span>
                             </div>
                         </div>
                         
@@ -353,43 +354,46 @@ const diasMatriz = computed(() => {
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" v-model="formGenerador.respetar_salientes" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
                                 <span class="text-xs font-bold text-white flex items-center gap-1.5">
-                                    <Moon class="w-3.5 h-3.5 text-indigo-400" /> Respetar salientes
+                                    <Moon class="w-3.5 h-3.5 text-indigo-400" /> Salientes
                                 </span>
                             </label>
                             <div v-if="formGenerador.respetar_salientes" class="pl-6 text-[11px] text-zinc-400 flex items-center gap-2">
-                                <span>Separación:</span>
                                 <select v-model="formGenerador.distancia_minima_dias" class="bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-emerald-500">
-                                    <option :value="1">24h (1 día libre)</option>
-                                    <option :value="2">48h (2 días libres)</option>
-                                    <option :value="3">72h (3 días libres)</option>
+                                    <option :value="1">24h libres</option>
+                                    <option :value="2">48h libres</option>
+                                    <option :value="3">72h libres</option>
                                 </select>
                             </div>
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-xs font-bold text-white mb-1">Max Guardias / Facultativo / Mes</label>
+                            <label class="block text-[10px] font-bold text-white mb-1">Max Totales</label>
                             <div class="flex items-center gap-2">
                                 <input type="number" min="0" max="15" v-model="formGenerador.max_guardias_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
-                                <span class="text-[10px] text-zinc-500">(0 = Sin límite)</span>
                             </div>
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-xs font-bold text-white mb-1">Max Findes / Facultativo / Mes</label>
+                            <label class="block text-[10px] font-bold text-white mb-1">Max Diarias / Findes</label>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-[10px] text-zinc-500 w-8">Lun-Vie:</span>
+                                <input type="number" min="0" max="10" v-model="formGenerador.max_diarias_mes" class="w-12 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold font-mono outline-none focus:border-emerald-500">
+                            </div>
                             <div class="flex items-center gap-2">
-                                <input type="number" min="0" max="5" v-model="formGenerador.max_findes_mes" class="w-16 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-emerald-500">
-                                <span class="text-[10px] text-zinc-500">(0 = Sin límite)</span>
+                                <span class="text-[10px] text-zinc-500 w-8">Findes:</span>
+                                <input type="number" min="0" max="5" v-model="formGenerador.max_findes_mes" class="w-12 bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold font-mono outline-none focus:border-emerald-500">
                             </div>
                         </div>
 
-                        <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
+                        <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2 col-span-1 md:col-span-2 lg:col-span-1">
+                            <label class="flex items-center gap-2 cursor-pointer mb-2">
+                                <input type="checkbox" v-model="formGenerador.prorratear_ausencias" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
+                                <span class="text-[10px] font-bold text-white leading-tight">Prorratear Ausencias</span>
+                            </label>
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" v-model="formGenerador.usar_memoria_anual" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500">
-                                <span class="text-xs font-bold text-white">Memoria Anual (YTD)</span>
+                                <span class="text-[10px] font-bold text-white leading-tight">Memoria Anual YTD</span>
                             </label>
-                            <p class="text-[10px] text-zinc-500 leading-tight">
-                                {{ formGenerador.usar_memoria_anual ? 'Compensa el esfuerzo acumulado del año.' : 'Empieza la equidad desde cero.' }}
-                            </p>
                         </div>
 
                     </div>
@@ -437,6 +441,7 @@ const diasMatriz = computed(() => {
             </button>
         </div>
 
+        <!-- Pestaña 1: Cuadrante Equidad -->
         <div v-if="pestanaActual === 'cuadrante'" class="space-y-4 sm:space-y-6 animate-in fade-in duration-200">
             <div v-if="guardias.length > 0" class="p-4 sm:p-5 bg-zinc-900 border border-zinc-800 rounded-xl">
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
@@ -482,6 +487,7 @@ const diasMatriz = computed(() => {
             </div>
         </div>
 
+        <!-- Pestaña 2: Calendario Cuadrícula -->
         <div v-if="pestanaActual === 'calendario'" class="space-y-2 sm:space-y-4 animate-in fade-in duration-200">
             <div class="grid grid-cols-7 gap-1 sm:gap-2 text-center text-[9px] sm:text-xs font-bold uppercase tracking-wider text-zinc-500 bg-zinc-950 p-1.5 sm:p-3 rounded-lg border border-zinc-800/60">
                 <div><span class="hidden sm:inline">Lunes</span><span class="sm:hidden">L</span></div>
@@ -533,6 +539,7 @@ const diasMatriz = computed(() => {
             </div>
         </div>
 
+        <!-- Pestaña 3: Reglas de la IA -->
         <div v-if="pestanaActual === 'reglas'" class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 animate-in fade-in duration-200">
             
             <div v-if="permisos.es_jefe" class="p-4 sm:p-6 bg-zinc-900 border border-zinc-800 rounded-xl h-fit">
