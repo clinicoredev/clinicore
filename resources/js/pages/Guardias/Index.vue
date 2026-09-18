@@ -9,6 +9,7 @@ import {
 const props = defineProps({
     guardias: Array,
     limitaciones: Array,
+    ausencias_mes: Array, // INYECTADO PARA EL VISOR DEL CALENDARIO
     medicos: Array,
     equidad: Array,
     permisos: Object,
@@ -119,7 +120,7 @@ const formGenerador = useForm({
     usar_plantilla_completa: true,
     medicos_incluidos: props.medicos.map(m => m.id),
     respetar_salientes: true,
-    distancia_minima_dias: 2, 
+    distancia_minima_dias: 2, // CORRECCIÓN: 2 = 1 día libre, 3 = 2 días libres
     max_guardias_mes: 0,      
     max_findes_mes: 0,  
     max_diarias_mes: 0,
@@ -198,7 +199,7 @@ const guardarGuardiaDesdeCalendario = () => {
 };
 
 // =========================================================================
-// MATRIZ DE CALENDARIO FIJA (Soporte Multi-Médico)
+// MATRIZ DE CALENDARIO FIJA CON VISOR DE REGLAS
 // =========================================================================
 const diasMatriz = computed(() => {
     const year = anioFiltro.value;
@@ -236,25 +237,45 @@ const diasMatriz = computed(() => {
         const dd = String(d).padStart(2, '0');
         const fechaString = `${year}-${mm}-${dd}`;
         
-        if (mapaGuardias[d] && mapaGuardias[d].length > 0) {
-            matrizCompleta.push({
-                esRelleno: false,
-                numero: d,
-                es_finde: esFinde,
-                fecha_vence: fechaString,
-                tiene_guardia: true,
-                guardias_dia: mapaGuardias[d]
-            });
-        } else {
-            matrizCompleta.push({
-                esRelleno: false,
-                numero: d,
-                es_finde: esFinde,
-                fecha_vence: fechaString,
-                tiene_guardia: false,
-                guardias_dia: []
+        // --- VISOR DE REGLAS ---
+        const vetosDelDia = [];
+        
+        props.limitaciones.forEach(l => {
+            if (l.tipo_raw === 'dia_semana') {
+                let isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+                if (parseInt(l.valor) === isoDay) vetosDelDia.push(l);
+            } else if (l.tipo_raw === 'fecha_concreta') {
+                if (l.valor === fechaString) vetosDelDia.push(l);
+            } else if (l.tipo_raw === 'periodo') {
+                const parts = l.valor.split(',');
+                if (parts.length === 2 && fechaString >= parts[0] && fechaString <= parts[1]) {
+                    vetosDelDia.push(l);
+                }
+            }
+        });
+
+        if (props.ausencias_mes) {
+            props.ausencias_mes.forEach(a => {
+                if (fechaString >= a.inicio && fechaString <= a.fin) {
+                    vetosDelDia.push({
+                        id: 'aus_' + a.id,
+                        medico: a.medico,
+                        motivo: a.motivo,
+                        es_ausencia: true
+                    });
+                }
             });
         }
+        
+        matrizCompleta.push({
+            esRelleno: false,
+            numero: d,
+            es_finde: esFinde,
+            fecha_vence: fechaString,
+            tiene_guardia: !!(mapaGuardias[d] && mapaGuardias[d].length > 0),
+            guardias_dia: mapaGuardias[d] || [],
+            vetos_dia: vetosDelDia
+        });
     }
     return matrizCompleta;
 });
@@ -359,9 +380,9 @@ const diasMatriz = computed(() => {
                             </label>
                             <div v-if="formGenerador.respetar_salientes" class="pl-6 text-[11px] text-zinc-400 flex items-center gap-2">
                                 <select v-model="formGenerador.distancia_minima_dias" class="bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-emerald-500">
-                                    <option :value="1">24h libres</option>
-                                    <option :value="2">48h libres</option>
-                                    <option :value="3">72h libres</option>
+                                    <option :value="2">24h libres</option>
+                                    <option :value="3">48h libres</option>
+                                    <option :value="4">72h libres</option>
                                 </select>
                             </div>
                         </div>
@@ -517,6 +538,15 @@ const diasMatriz = computed(() => {
                     </div>
 
                     <div v-if="!celda.esRelleno" class="flex-1 flex flex-col gap-1 z-10 relative overflow-y-auto hide-scrollbar">
+                        
+                        <!-- REGLAS Y AUSENCIAS DEL DÍA -->
+                        <div v-if="celda.vetos_dia.length > 0" class="flex flex-col gap-0.5 mb-1 px-0.5">
+                            <div v-for="veto in celda.vetos_dia" :key="veto.id" class="px-1 py-0.5 rounded text-[8px] sm:text-[9px] font-bold flex items-center gap-1 truncate" :class="veto.es_ausencia ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'" :title="veto.motivo">
+                                <Ban class="w-2.5 h-2.5 shrink-0" /> {{ veto.medico.replace('Dr. ', '').replace('Dra. ', '') }}
+                            </div>
+                        </div>
+
+                        <!-- TURNOS DE GUARDIA -->
                         <div v-if="celda.tiene_guardia">
                             <div v-for="g in celda.guardias_dia" :key="g.id" class="w-full p-1 rounded border text-center flex flex-col items-center justify-center min-h-[30px] mb-1 shadow-sm transition-all relative group/item" :class="[g.is_manual ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' : (celda.es_finde ? 'bg-zinc-950/50 text-amber-200 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20')]">
                                 <div class="flex items-center gap-0.5 sm:gap-1 justify-center w-full">

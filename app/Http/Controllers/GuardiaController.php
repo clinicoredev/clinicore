@@ -55,15 +55,14 @@ class GuardiaController extends Controller
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
 
-        // 1. MÉDICOS: Solo Adjuntos (excluyendo SuperAdmins y Residentes)
-        // Nota: El 'Admin de Residentes' sí saldrá aquí para hacer guardias, pero no podrá gestionar el módulo.
+        // 1. MÉDICOS: Solo Adjuntos
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
             ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
             ->get();
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
 
-        // 2. GUARDIAS: Aislamiento estricto por especialidad_id y IDs de Adjuntos
+        // 2. GUARDIAS
         $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->with('facultativo') 
@@ -85,7 +84,7 @@ class GuardiaController extends Controller
                 'observaciones' => $g->observaciones
             ]);
 
-        // 3. LIMITACIONES: Filtradas estrictamente por los IDs de Adjuntos
+        // 3. LIMITACIONES
         $limitaciones = LimitacionGuardia::with('facultativo')
             ->where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
@@ -108,9 +107,32 @@ class GuardiaController extends Controller
                     'medico' => $l->facultativo ? $l->facultativo->name : 'Usuario borrado', 
                     'regla' => $reglaLegible,
                     'tipo_raw' => $l->tipo,
-                    'motivo' => $l->motivo ?: 'Sin motivo especificado'
+                    'valor' => $l->valor, // Necesario enviarlo puro para el Frontend
+                    'motivo' => $l->motivo ?: 'Veto del algoritmo'
                 ];
             });
+
+        // NUEVO 3.5: EXTRAER AUSENCIAS PARA VERLAS EN EL CALENDARIO FRONTEND
+        $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
+        $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
+        
+        $ausenciasMes = Ausencia::where('especialidad_id', $usuario->especialidad_id)
+            ->whereIn('user_id', $idsAdjuntos)
+            ->where('estado', 'aprobada')
+            ->where(function($q) use ($inicioMes, $finMes) {
+                $q->whereBetween('fecha_inicio', [$inicioMes, $finMes])
+                  ->orWhereBetween('fecha_fin', [$inicioMes, $finMes])
+                  ->orWhere(fn($sub) => $sub->where('fecha_inicio', '<', $inicioMes)->where('fecha_fin', '>', $finMes));
+            })
+            ->with('solicitante')
+            ->get()
+            ->map(fn($a) => [
+                'id' => $a->id,
+                'medico' => $a->solicitante ? $a->solicitante->name : 'Desconocido',
+                'inicio' => Carbon::parse($a->fecha_inicio)->format('Y-m-d'),
+                'fin' => Carbon::parse($a->fecha_fin)->format('Y-m-d'),
+                'motivo' => $a->motivo ?: 'Ausencia justificada'
+            ]);
 
         // 4. CÁLCULO DE EQUIDAD
         $equidad = $medicos->map(function ($medico) use ($guardias) {
@@ -125,6 +147,7 @@ class GuardiaController extends Controller
         return inertia('Guardias/Index', [
             'guardias' => $guardias,
             'limitaciones' => $limitaciones,
+            'ausencias_mes' => $ausenciasMes, // PASAMOS LAS AUSENCIAS AL CALENDARIO
             'medicos' => $medicos,
             'equidad' => $equidad,
             'permisos' => ['es_jefe' => $usuario->hasRole('Jefe de Servicio')],
@@ -241,7 +264,7 @@ class GuardiaController extends Controller
         $request->validate([
             'mes' => 'required|integer|between:1,12', 
             'anio' => 'required|integer', 
-            'personas_por_dia' => 'required|integer|min:1|max:10',
+            'personas_por_dia' => 'required|integer|min:1|max:10', 
             'medicos_incluidos' => 'nullable|array',
             'respetar_salientes' => 'boolean',
             'distancia_minima_dias' => 'nullable|integer|min:1|max:10',
@@ -273,7 +296,7 @@ class GuardiaController extends Controller
             ->get();
 
         if ($medicos->count() < $personasPorDia) {
-            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos para cubrir los puestos simultáneos configurados.']);
+            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos para cubrir los puestos simultáneos.']);
         }
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
@@ -322,13 +345,8 @@ class GuardiaController extends Controller
             }
 
             $stats[$m->id] = [
-                'total_mes' => 0, 
-                'findes_mes' => 0, 
-                'diarias_mes' => 0, 
-                'total_anual' => 0,
-                'findes_anual' => 0,
-                'puntos_esfuerzo' => 0,
-                'dias_disponibles_mes' => max(1, $diasDisponibles)
+                'total_mes' => 0, 'findes_mes' => 0, 'diarias_mes' => 0, 'total_anual' => 0,
+                'findes_anual' => 0, 'puntos_esfuerzo' => 0, 'dias_disponibles_mes' => max(1, $diasDisponibles)
             ];
         }
 
@@ -375,7 +393,9 @@ class GuardiaController extends Controller
             if ($maxFindesMes > 0 && $fecha->isWeekend() && $stats[$medicoId]['findes_mes'] >= $maxFindesMes) return false;
             if ($maxDiariasMes > 0 && !$fecha->isWeekend() && $stats[$medicoId]['diarias_mes'] >= $maxDiariasMes) return false;
             
-            if ($guardiasManuales->where('user_id', $medicoId)->where('fecha', $fecha->format('Y-m-d'))->count() > 0) return false;
+            // CORRECCIÓN BUG: Usar formateo string para que Eloquent no falle al reconocer las fijadas manualmente
+            $yaTieneManual = $guardiasManuales->where('user_id', $medicoId)->filter(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d') === $fecha->format('Y-m-d'))->count() > 0;
+            if ($yaTieneManual) return false;
             if (collect($guardiasAInsertar)->where('user_id', $medicoId)->where('fecha', $fecha->format('Y-m-d'))->count() > 0) return false;
 
             foreach ($ausencias as $a) {
@@ -388,10 +408,11 @@ class GuardiaController extends Controller
                 }
             }
 
+            // CORRECCIÓN SALIENTES: Validación cronológica inyectando parseo estricto
             if ($respetarSalientes) {
                 $fechasMedico = collect($guardiasAInsertar)
                     ->where('user_id', $medicoId)->pluck('fecha')
-                    ->concat($guardiasManuales->where('user_id', $medicoId)->pluck('fecha'))
+                    ->concat($guardiasManuales->where('user_id', $medicoId)->map(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d')))
                     ->map(fn($f) => Carbon::parse($f));
 
                 foreach ($fechasMedico as $fGuardia) {
@@ -422,13 +443,14 @@ class GuardiaController extends Controller
             $esFinde = $fecha->isWeekend();
             $tipoTurno = $esFinde ? 'festivo_24h' : 'diaria_17h';
 
-            $puestosCubiertos = $guardiasManuales->where('fecha', $fecha->format('Y-m-d'))->count();
+            // CORRECCIÓN SOLAPAMIENTO: Reconoce y filtra correctamente la fecha cruda manual
+            $puestosCubiertos = $guardiasManuales->filter(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d') === $fecha->format('Y-m-d'))->count();
 
             while ($puestosCubiertos < $personasPorDia) {
                 $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fecha));
 
                 if ($candidatos->isEmpty()) {
-                    return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el día " . $fecha->format('d/m/Y') . ". Las restricciones de distancia impiden encontrar un facultativo libre."]);
+                    return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el día " . $fecha->format('d/m/Y') . ". Las restricciones de distancia o vetos impiden encontrar un facultativo libre."]);
                 }
 
                 $elegido = $candidatos->sortBy(function($m) use ($stats) {
@@ -526,8 +548,9 @@ class GuardiaController extends Controller
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
         $especialidadId = $request->user()->especialidad_id;
+        $nombreArchivo = "Cuadrante_Guardias_{$mes}_{$anio}.xlsx";
 
-        return Excel::download(new GuardiasExport($especialidadId, $mes, $anio), "Cuadrante_Guardias_{$mes}_{$anio}.xlsx");
+        return Excel::download(new GuardiasExport($especialidadId, $mes, $anio), $nombreArchivo);
     }
 
     public function exportarPdf(Request $request)
