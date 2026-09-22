@@ -58,7 +58,7 @@ class ResidenteGuardiaController extends Controller
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
 
-        // 1. MÉDICOS (DESPLEGABLES): Solo del Tenant actual y con rol Residente
+        // 1. MÉDICOS (DESPLEGABLES): Solo del Tenant actual y con rol Residente o Admin de Residentes
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
             ->whereHas('roles', function ($query) {
                 $query->whereIn('name', ['Residente', 'Admin de Residentes']);
@@ -112,9 +112,32 @@ class ResidenteGuardiaController extends Controller
                     'medico' => $l->facultativo ? $l->facultativo->name : 'Usuario borrado', 
                     'regla' => $reglaLegible,
                     'tipo_raw' => $l->tipo,
+                    'valor' => $l->valor, // Necesario enviarlo puro para el Frontend
                     'motivo' => $l->motivo ?: 'Sin motivo especificado'
                 ];
             });
+
+        // 3.5 EXTRAER AUSENCIAS PARA EL VISOR DEL CALENDARIO FRONTEND
+        $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
+        $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
+        
+        $ausenciasMes = Ausencia::where('especialidad_id', $usuario->especialidad_id)
+            ->whereIn('user_id', $idsResidentes)
+            ->where('estado', 'aprobada')
+            ->where(function($q) use ($inicioMes, $finMes) {
+                $q->whereBetween('fecha_inicio', [$inicioMes, $finMes])
+                  ->orWhereBetween('fecha_fin', [$inicioMes, $finMes])
+                  ->orWhere(fn($sub) => $sub->where('fecha_inicio', '<', $inicioMes)->where('fecha_fin', '>', $finMes));
+            })
+            ->with('solicitante')
+            ->get()
+            ->map(fn($a) => [
+                'id' => $a->id,
+                'medico' => $a->solicitante ? $a->solicitante->name : 'Desconocido',
+                'inicio' => Carbon::parse($a->fecha_inicio)->format('Y-m-d'),
+                'fin' => Carbon::parse($a->fecha_fin)->format('Y-m-d'),
+                'motivo' => $a->motivo ?: 'Ausencia justificada'
+            ]);
 
         // 4. CÁLCULO DE EQUIDAD (Auditoría del mes actual)
         $equidad = $medicos->map(function ($medico) use ($guardias) {
@@ -131,6 +154,7 @@ class ResidenteGuardiaController extends Controller
         return inertia('Residentes/Guardias/Index', [
             'guardias' => $guardias,
             'limitaciones' => $limitaciones,
+            'ausencias_mes' => $ausenciasMes, // PASAMOS LAS AUSENCIAS AL CALENDARIO
             'medicos' => $medicos,
             'equidad' => $equidad,
             'permisos' => ['es_jefe' => $usuario->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])],
@@ -252,9 +276,11 @@ class ResidenteGuardiaController extends Controller
             'personas_por_dia' => 'required|integer|min:1|max:10',
             'medicos_incluidos' => 'nullable|array',
             'respetar_salientes' => 'boolean',
-            'distancia_minima_dias' => 'nullable|integer|min:1|max:5',
+            'distancia_minima_dias' => 'nullable|integer|min:1|max:10',
             'max_guardias_mes' => 'nullable|integer|min:0',
             'max_findes_mes' => 'nullable|integer|min:0',
+            'max_diarias_mes' => 'nullable|integer|min:0', // LIMITE DIARIAS
+            'prorratear_ausencias' => 'boolean', // PRORRATEO
             'usar_memoria_anual' => 'boolean'
         ]);
         
@@ -267,10 +293,12 @@ class ResidenteGuardiaController extends Controller
         $distanciaMinimaDias = $request->input('distancia_minima_dias', 2);
         $maxGuardiasMes = (int) $request->input('max_guardias_mes', 0);
         $maxFindesMes = (int) $request->input('max_findes_mes', 0);
+        $maxDiariasMes = (int) $request->input('max_diarias_mes', 0);
+        $prorratearAusencias = $request->boolean('prorratear_ausencias', true);
         $usarMemoriaAnual = $request->boolean('usar_memoria_anual', true);
+        
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        // 1. Cargamos médicos filtrados por el rol Residente
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
             ->whereHas('roles', function ($query) {
                 $query->whereIn('name', ['Residente', 'Admin de Residentes']);
@@ -281,12 +309,11 @@ class ResidenteGuardiaController extends Controller
             ->get();
 
         if ($medicos->count() < $personasPorDia) {
-            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes residentes para cubrir '.$personasPorDia.' puestos simultáneos.']);
+            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes residentes para cubrir los puestos simultáneos.']);
         }
 
         $idsResidentes = $medicos->pluck('id')->toArray();
 
-        // 2. Cargamos ausencias y limitaciones aisladas
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
         $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
 
@@ -301,44 +328,38 @@ class ResidenteGuardiaController extends Controller
             ->whereIn('user_id', $idsResidentes)
             ->get();
 
-        // 3. LECTURA DE GUARDIAS MANUALES
         $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereIn('user_id', $idsResidentes)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
             ->where('is_manual', true)
             ->get();
 
-        // 4. ESTRUCTURA DE ESTADÍSTICAS Y EQUIDAD RELATIVA
         $stats = [];
         foreach ($medicos as $m) {
             $diasDisponibles = $diasDelMes;
-            foreach($ausencias->where('user_id', $m->id) as $a) {
-                $inicioA = Carbon::parse($a->fecha_inicio)->max($inicioMes);
-                $finA = Carbon::parse($a->fecha_fin)->min($finMes);
-                $diasDisponibles -= $inicioA->diffInDays($finA) + 1;
-            }
-            foreach($limitaciones->where('user_id', $m->id) as $l) {
-                if($l->tipo === 'dia_semana') $diasDisponibles -= 4; 
-                // Añadido descuento de dias si es un periodo entero
-                if($l->tipo === 'periodo') {
-                    $parts = explode(',', $l->valor);
-                    if(count($parts) === 2) {
-                        $inicioL = Carbon::parse($parts[0])->max($inicioMes);
-                        $finL = Carbon::parse($parts[1])->min($finMes);
-                        if ($inicioL <= $finL) $diasDisponibles -= $inicioL->diffInDays($finL) + 1;
+            
+            if ($prorratearAusencias) {
+                foreach($ausencias->where('user_id', $m->id) as $a) {
+                    $inicioA = Carbon::parse($a->fecha_inicio)->max($inicioMes);
+                    $finA = Carbon::parse($a->fecha_fin)->min($finMes);
+                    $diasDisponibles -= $inicioA->diffInDays($finA) + 1;
+                }
+                foreach($limitaciones->where('user_id', $m->id) as $l) {
+                    if($l->tipo === 'dia_semana') $diasDisponibles -= 4; 
+                    if($l->tipo === 'periodo') {
+                        $parts = explode(',', $l->valor);
+                        if(count($parts) === 2) {
+                            $inicioL = Carbon::parse($parts[0])->max($inicioMes);
+                            $finL = Carbon::parse($parts[1])->min($finMes);
+                            if ($inicioL <= $finL) $diasDisponibles -= $inicioL->diffInDays($finL) + 1;
+                        }
                     }
                 }
             }
 
             $stats[$m->id] = [
-                'total_mes' => 0, 
-                'findes_mes' => 0, 
-                'total_anual' => 0,
-                'findes_anual' => 0,
-                'puntos_esfuerzo' => 0,
-                'historial_dias_semana' => [],
-                'ultima_guardia_fecha' => null,
-                'dias_disponibles_mes' => max(1, $diasDisponibles)
+                'total_mes' => 0, 'findes_mes' => 0, 'diarias_mes' => 0, 'total_anual' => 0,
+                'findes_anual' => 0, 'puntos_esfuerzo' => 0, 'dias_disponibles_mes' => max(1, $diasDisponibles)
             ];
         }
 
@@ -364,34 +385,30 @@ class ResidenteGuardiaController extends Controller
             $f = Carbon::parse($gm->fecha);
             $stats[$gm->user_id]['total_mes']++;
             $stats[$gm->user_id]['total_anual']++;
-            $stats[$gm->user_id]['historial_dias_semana'][] = $f->dayOfWeekIso;
-            $stats[$gm->user_id]['ultima_guardia_fecha'] = $f->copy();
             
             if ($f->isWeekend() || $gm->tipo === 'festivo_24h') {
                 $stats[$gm->user_id]['findes_mes']++;
                 $stats[$gm->user_id]['findes_anual']++;
                 $stats[$gm->user_id]['puntos_esfuerzo'] += 2;
             } else {
+                $stats[$gm->user_id]['diarias_mes']++;
                 $stats[$gm->user_id]['puntos_esfuerzo'] += 1;
             }
-        }
-
-        $diasFinde = []; $diasSemana = [];
-        for ($d = 1; $d <= $diasDelMes; $d++) {
-            $f = Carbon::createFromDate($anio, $mes, $d);
-            $f->isWeekend() ? $diasFinde[] = $f : $diasSemana[] = $f;
         }
 
         $guardiasAInsertar = [];
 
         $esElegible = function($medicoId, Carbon $fecha) use (
-            $ausencias, $limitaciones, &$stats, 
-            $respetarSalientes, $distanciaMinimaDias, $maxGuardiasMes, $maxFindesMes, $guardiasAInsertar
+            $ausencias, $limitaciones, &$stats, $guardiasManuales,
+            $respetarSalientes, $distanciaMinimaDias, $maxGuardiasMes, $maxFindesMes, $maxDiariasMes, &$guardiasAInsertar
         ) {
             if ($maxGuardiasMes > 0 && $stats[$medicoId]['total_mes'] >= $maxGuardiasMes) return false;
             if ($maxFindesMes > 0 && $fecha->isWeekend() && $stats[$medicoId]['findes_mes'] >= $maxFindesMes) return false;
+            if ($maxDiariasMes > 0 && !$fecha->isWeekend() && $stats[$medicoId]['diarias_mes'] >= $maxDiariasMes) return false;
             
-            // Bloquear si el médico ya tiene guardia ese mismo día (prevención de auto-solapamiento)
+            // Verificación de solapamiento estricta con formato
+            $yaTieneManual = $guardiasManuales->where('user_id', $medicoId)->filter(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d') === $fecha->format('Y-m-d'))->count() > 0;
+            if ($yaTieneManual) return false;
             if (collect($guardiasAInsertar)->where('user_id', $medicoId)->where('fecha', $fecha->format('Y-m-d'))->count() > 0) return false;
 
             foreach ($ausencias as $a) {
@@ -404,15 +421,24 @@ class ResidenteGuardiaController extends Controller
                 }
             }
 
-            if ($respetarSalientes && $stats[$medicoId]['ultima_guardia_fecha'] !== null) {
-                if (abs($fecha->diffInDays($stats[$medicoId]['ultima_guardia_fecha'])) < $distanciaMinimaDias) return false;
+            // Validación de salientes cronológica
+            if ($respetarSalientes) {
+                $fechasMedico = collect($guardiasAInsertar)
+                    ->where('user_id', $medicoId)->pluck('fecha')
+                    ->concat($guardiasManuales->where('user_id', $medicoId)->map(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d')))
+                    ->map(fn($f) => Carbon::parse($f));
+
+                foreach ($fechasMedico as $fGuardia) {
+                    if (abs($fecha->diffInDays($fGuardia)) < $distanciaMinimaDias) {
+                        return false;
+                    }
+                }
             }
 
             foreach ($limitaciones as $l) {
                 if ($l->user_id == $medicoId) {
                     if ($l->tipo === 'dia_semana' && (int)$fecha->dayOfWeekIso === (int)$l->valor) return false;
                     if ($l->tipo === 'fecha_concreta' && $fecha->format('Y-m-d') === $l->valor) return false;
-                    // REGLA PARA PERIODO
                     if ($l->tipo === 'periodo') {
                         $parts = explode(',', $l->valor);
                         if (count($parts) === 2 && $fecha->between(Carbon::parse($parts[0])->startOfDay(), Carbon::parse($parts[1])->endOfDay())) {
@@ -425,15 +451,19 @@ class ResidenteGuardiaController extends Controller
             return true;
         };
 
-        // --- FASE 1: FINES DE SEMANA ---
-        foreach ($diasFinde as $fecha) {
-            $puestosCubiertos = $guardiasManuales->where('fecha', $fecha->format('Y-m-d'))->count();
+        // BUCLE CRONOLÓGICO: PROCESA DÍA A DÍA
+        for ($d = 1; $d <= $diasDelMes; $d++) {
+            $fecha = Carbon::createFromDate($anio, $mes, $d);
+            $esFinde = $fecha->isWeekend();
+            $tipoTurno = $esFinde ? 'festivo_24h' : 'diaria_17h';
+
+            $puestosCubiertos = $guardiasManuales->filter(fn($g) => Carbon::parse($g->fecha)->format('Y-m-d') === $fecha->format('Y-m-d'))->count();
 
             while ($puestosCubiertos < $personasPorDia) {
                 $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fecha));
 
                 if ($candidatos->isEmpty()) {
-                    return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el fin de semana del " . $fecha->format('d/m/Y')]);
+                    return back()->withErrors(['algoritmo' => "COLAPSO: Imposible cubrir el día " . $fecha->format('d/m/Y') . ". Las restricciones de distancia o vetos impiden encontrar un residente libre."]);
                 }
 
                 $elegido = $candidatos->sortBy(function($m) use ($stats) {
@@ -442,54 +472,33 @@ class ResidenteGuardiaController extends Controller
                 })->first();
 
                 $guardiasAInsertar[] = [
-                    'especialidad_id' => $jefe->especialidad_id, 'user_id' => $elegido->id, 'fecha' => $fecha->format('Y-m-d'),
-                    'tipo' => 'festivo_24h', 'estado' => 'programada', 'is_manual' => false, 'observaciones' => 'IA', 'created_at' => now(), 'updated_at' => now()
+                    'especialidad_id' => $jefe->especialidad_id, 
+                    'user_id' => $elegido->id, 
+                    'fecha' => $fecha->format('Y-m-d'),
+                    'tipo' => $tipoTurno, 
+                    'estado' => 'programada', 
+                    'is_manual' => false, 
+                    'observaciones' => 'IA', 
+                    'created_at' => now(), 
+                    'updated_at' => now()
                 ];
 
-                $stats[$elegido->id]['findes_mes']++;
-                $stats[$elegido->id]['findes_anual']++;
                 $stats[$elegido->id]['total_mes']++;
                 $stats[$elegido->id]['total_anual']++;
-                $stats[$elegido->id]['puntos_esfuerzo'] += 2;
-                $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
-                $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
                 
-                $puestosCubiertos++;
-            }
-        }
-
-        // --- FASE 2: DÍAS DE DIARIO (17h) ---
-        foreach ($diasSemana as $fecha) {
-            $puestosCubiertos = $guardiasManuales->where('fecha', $fecha->format('Y-m-d'))->count();
-
-            while ($puestosCubiertos < $personasPorDia) {
-                $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fecha));
-
-                if ($candidatos->isEmpty()) {
-                    return back()->withErrors(['algoritmo' => "COLAPSO: Hueco irresoluble el " . $fecha->format('d/m/Y')]);
+                if ($esFinde) {
+                    $stats[$elegido->id]['findes_mes']++;
+                    $stats[$elegido->id]['findes_anual']++;
+                    $stats[$elegido->id]['puntos_esfuerzo'] += 2;
+                } else {
+                    $stats[$elegido->id]['diarias_mes']++;
+                    $stats[$elegido->id]['puntos_esfuerzo'] += 1;
                 }
-
-                $elegido = $candidatos->sortBy(function($m) use ($stats) {
-                    $ratio = $stats[$m->id]['puntos_esfuerzo'] / $stats[$m->id]['dias_disponibles_mes'];
-                    return ($ratio * 1000) + (rand(0, 5) / 10);
-                })->first();
-
-                $guardiasAInsertar[] = [
-                    'especialidad_id' => $jefe->especialidad_id, 'user_id' => $elegido->id, 'fecha' => $fecha->format('Y-m-d'),
-                    'tipo' => 'diaria_17h', 'estado' => 'programada', 'is_manual' => false, 'observaciones' => 'IA', 'created_at' => now(), 'updated_at' => now()
-                ];
-
-                $stats[$elegido->id]['total_mes']++;
-                $stats[$elegido->id]['total_anual']++;
-                $stats[$elegido->id]['puntos_esfuerzo'] += 1;
-                $stats[$elegido->id]['historial_dias_semana'][] = $fecha->dayOfWeekIso;
-                $stats[$elegido->id]['ultima_guardia_fecha'] = $fecha->copy();
                 
                 $puestosCubiertos++;
             }
         }
 
-        // Transacción de guardado
         DB::transaction(function() use ($jefe, $mes, $anio, $idsResidentes, $guardiasAInsertar) {
             Guardia::where('especialidad_id', $jefe->especialidad_id)
                 ->whereIn('user_id', $idsResidentes)
@@ -500,7 +509,7 @@ class ResidenteGuardiaController extends Controller
             Guardia::insert($guardiasAInsertar);
         });
 
-        return back()->with('success', 'Cuadrante de Residentes generado con éxito.');
+        return back()->with('success', 'Cuadrante generado con éxito.');
     }
 
     public function borrarTodo(Request $request)
@@ -508,7 +517,6 @@ class ResidenteGuardiaController extends Controller
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
         $jefe = $request->user();
 
-        // Borra solo las guardias de residentes del mes seleccionado
         $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
         Guardia::where('especialidad_id', $jefe->especialidad_id)
             ->whereIn('user_id', $idsResidentes)
