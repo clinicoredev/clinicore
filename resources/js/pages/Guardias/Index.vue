@@ -10,6 +10,7 @@ const props = defineProps({
     guardias: Array,
     limitaciones: Array,
     ausencias_mes: Array,
+    festivos: Array, // Lo mantenemos para que el calendario sepa qué días pintar
     medicos: Array,
     equidad: Array,
     permisos: Object,
@@ -164,13 +165,6 @@ const guardarRegla = () => {
     }); 
 };
 
-const guardarGuardiaManual = () => { 
-    formManual.post('/guardias/manual', { 
-        preserveScroll: true, 
-        onSuccess: () => formManual.reset('user_id', 'fecha') 
-    }); 
-};
-
 // =========================================================================
 // ASIGNACIÓN RÁPIDA (MODAL)
 // =========================================================================
@@ -183,7 +177,7 @@ const abrirModalAsignacion = (celda) => {
     
     formManual.fecha = celda.fecha_vence;
     formManual.user_id = celda.user_id || '';
-    formManual.tipo = celda.tipo || 'diaria_17h';
+    formManual.tipo = celda.es_festivo || celda.es_finde_natural ? 'festivo_24h' : 'diaria_17h'; // IA autodetecta
     
     modalAsignacionAbierto.value = true;
 };
@@ -200,7 +194,7 @@ const guardarGuardiaDesdeCalendario = () => {
 };
 
 // =========================================================================
-// MATRIZ DE CALENDARIO FIJA CON VISOR DE REGLAS
+// MATRIZ DE CALENDARIO FIJA CON VISOR DE REGLAS Y FESTIVOS
 // =========================================================================
 const diasMatriz = computed(() => {
     const year = anioFiltro.value;
@@ -232,15 +226,20 @@ const diasMatriz = computed(() => {
     for (let d = 1; d <= totalDias; d++) {
         const fechaObj = new Date(year, month - 1, d);
         const dayOfWeek = fechaObj.getDay(); 
-        const esFinde = (dayOfWeek === 0 || dayOfWeek === 6);
         
         const mm = String(month).padStart(2, '0');
         const dd = String(d).padStart(2, '0');
         const fechaString = `${year}-${mm}-${dd}`;
         
-        // --- VISOR DE REGLAS ---
-        const vetosDelDia = [];
+        // Comprobar Festivo
+        const festivoData = props.festivos?.find(f => f.fecha === fechaString);
+        const esFestivo = !!festivoData;
         
+        const esFindeNatural = (dayOfWeek === 0 || dayOfWeek === 6);
+        const esFindeVirtual = esFindeNatural || esFestivo; // Rige el color de la caja
+        
+        // Visor Reglas
+        const vetosDelDia = [];
         props.limitaciones.forEach(l => {
             if (l.tipo_raw === 'dia_semana') {
                 let isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
@@ -271,7 +270,10 @@ const diasMatriz = computed(() => {
         matrizCompleta.push({
             esRelleno: false,
             numero: d,
-            es_finde: esFinde,
+            es_finde: esFindeVirtual, 
+            es_finde_natural: esFindeNatural,
+            es_festivo: esFestivo,
+            nombre_festivo: festivoData ? festivoData.descripcion : '',
             fecha_vence: fechaString,
             tiene_guardia: !!(mapaGuardias[d] && mapaGuardias[d].length > 0),
             guardias_dia: mapaGuardias[d] || [],
@@ -287,11 +289,11 @@ const diasMatriz = computed(() => {
 
     <div class="space-y-4 sm:space-y-6 relative max-w-full overflow-hidden">
         
-        <!-- ALERTA DE CONFLICTO / ERROR DE PERMUTA / MANUAL -->
+        <!-- ALERTA DE ERRORES -->
         <div v-if="$page.props.errors.conflicto || $page.props.errors.algoritmo" class="p-4 bg-rose-500/20 border-2 border-rose-500/50 rounded-xl sm:rounded-2xl flex items-center gap-3 text-rose-200 animate-in fade-in zoom-in">
             <ShieldAlert class="w-6 h-6 text-rose-400 shrink-0" />
             <div>
-                <span class="font-bold text-rose-400 uppercase text-[10px] sm:text-xs tracking-wider block">Bloqueo de Seguridad</span>
+                <span class="font-bold text-rose-400 uppercase text-[10px] sm:text-xs tracking-wider block">Aviso del Sistema</span>
                 <p class="text-xs sm:text-sm font-medium mt-0.5">{{ $page.props.errors.conflicto || $page.props.errors.algoritmo }}</p>
             </div>
             <button @click="$page.props.errors.conflicto = null; $page.props.errors.algoritmo = null" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer transition-colors">
@@ -316,7 +318,7 @@ const diasMatriz = computed(() => {
             <div class="p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
                 <div class="space-y-1">
                     <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] sm:text-xs font-mono font-bold">
-                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v5.0 (CUOTAS JUSTAS)
+                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v5.1 (SOPORTE DE FESTIVOS)
                     </div>
                     <h2 class="text-lg sm:text-xl font-bold text-white tracking-tight">Planificador Sanitario Automatizado</h2>
                 </div>
@@ -380,7 +382,6 @@ const diasMatriz = computed(() => {
                             </label>
                             <div v-if="formGenerador.respetar_salientes" class="pl-6 text-[11px] text-zinc-400 flex items-center gap-2">
                                 <select v-model="formGenerador.distancia_minima_dias" class="w-full bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-emerald-500">
-                                    <option :value="0">0 días libres (Seguidos)</option>
                                     <option :value="1">1 día libre en medio (Días alternos)</option>
                                     <option :value="2">2 días libres en medio (48h)</option>
                                     <option :value="3">3 días libres en medio (72h)</option>
@@ -389,7 +390,7 @@ const diasMatriz = computed(() => {
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2 col-span-1 md:col-span-2 lg:col-span-2">
-                            <label class="block text-[10px] font-bold text-white mb-1 uppercase tracking-wider">Agrupación Equitativa de Fines de Semana</label>
+                            <label class="block text-[10px] font-bold text-white mb-1 uppercase tracking-wider">Agrupación Equitativa</label>
                             <select v-model="formGenerador.agrupacion" class="w-full bg-zinc-950 border border-zinc-700 text-emerald-400 rounded px-2 py-1.5 text-xs font-bold outline-none focus:border-emerald-500">
                                 <option value="ninguna">Sin agrupar (Individuales)</option>
                                 <option value="v_s">Viernes + Sábado (V+S)</option>
@@ -468,9 +469,6 @@ const diasMatriz = computed(() => {
             <button @click="pestanaActual = 'reglas'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'reglas' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-zinc-400'">
                 <Ban class="w-3.5 h-3.5" /> Reglas ({{ totalReglasVisibles }})
             </button>
-            <button v-if="permisos.es_jefe" @click="pestanaActual = 'manual'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'manual' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-zinc-400'">
-                <Pin class="w-3.5 h-3.5" /> Manual
-            </button>
         </div>
 
         <!-- Pestaña 1: Cuadrante Equidad -->
@@ -481,7 +479,7 @@ const diasMatriz = computed(() => {
                         <div class="text-zinc-300 font-bold truncate text-[10px] sm:text-xs">{{ eq.nombre }}</div>
                         <div class="mt-1 flex justify-between text-[9px] sm:text-[11px]">
                             <span class="text-zinc-500">Total: <b class="text-white">{{ eq.totales }}</b></span>
-                            <span class="text-emerald-500">Finde: <b class="text-emerald-400">{{ eq.findes }}</b></span>
+                            <span class="text-emerald-500">Finde/Festivo: <b class="text-emerald-400">{{ eq.findes }}</b></span>
                         </div>
                     </div>
                 </div>
@@ -550,6 +548,11 @@ const diasMatriz = computed(() => {
 
                     <div v-if="!celda.esRelleno" class="flex-1 flex flex-col gap-1 z-10 relative overflow-y-auto hide-scrollbar">
                         
+                        <!-- CHAPA DE FESTIVO -->
+                        <div v-if="celda.es_festivo" class="text-[8px] sm:text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1 py-0.5 rounded text-center truncate w-full mb-1">
+                            🎉 {{ celda.nombre_festivo || 'Festivo' }}
+                        </div>
+
                         <!-- REGLAS Y AUSENCIAS DEL DÍA -->
                         <div v-if="celda.vetos_dia.length > 0" class="flex flex-col gap-0.5 mb-1 px-0.5">
                             <div v-for="veto in celda.vetos_dia" :key="veto.id" class="px-1 py-0.5 rounded text-[8px] sm:text-[9px] font-bold flex items-center gap-1 truncate" :class="veto.es_ausencia ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'" :title="veto.motivo">
@@ -679,23 +682,6 @@ const diasMatriz = computed(() => {
             </div>
         </div>
 
-        <div v-if="pestanaActual === 'manual' && permisos.es_jefe" class="max-w-md w-full bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-800 mx-auto animate-in fade-in">
-            <form @submit.prevent="guardarGuardiaManual" class="space-y-4">
-                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
-                    <option value="" disabled selected>Facultativo...</option>
-                    <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>
-                </select>
-                <input v-model="formManual.fecha" required type="date" class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 font-mono text-xs sm:text-sm outline-none" />
-                <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
-                    <option value="diaria_17h">Diario (17h)</option>
-                    <option value="festivo_24h">Festivo (24h)</option>
-                </select>
-                <button type="submit" :disabled="formManual.processing" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center gap-2 cursor-pointer disabled:opacity-50">
-                    <Pin class="w-4 h-4" /> Fijar Turno
-                </button>
-            </form>
-        </div>
-
         <div v-if="modalAsignacionAbierto" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
             <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-in slide-in-from-top-4">
                 <div class="p-4 bg-zinc-950 border-b border-zinc-800 flex justify-between items-center">
@@ -719,7 +705,7 @@ const diasMatriz = computed(() => {
                             <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Tipo de Guardia</label>
                             <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
                                 <option value="diaria_17h">Diario (17h)</option>
-                                <option value="festivo_24h">Festivo (24h)</option>
+                                <option value="festivo_24h">Festivo/Finde (24h)</option>
                             </select>
                         </div>
                         <div class="pt-2 flex gap-2">

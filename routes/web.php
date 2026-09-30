@@ -11,6 +11,7 @@ use App\Http\Controllers\CalendarioGlobalController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GuardiaController;
 use App\Http\Controllers\ResidenteGuardiaController;
+use App\Http\Controllers\FestivoController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -39,6 +40,7 @@ Route::middleware(['auth', 'role:SuperAdmin'])->prefix('admin')->group(function 
     Route::post('/users', [TenantController::class, 'storeUser'])->name('admin.users.store');
     Route::put('/users/{id}', [TenantController::class, 'updateUser'])->name('admin.users.update');
     Route::delete('/users/{id}', [TenantController::class, 'destroyUser'])->name('admin.users.destroy');
+
 
     // MODO DIOS: ENTRAR 
     // (Asegúrate de que es un método POST y está DENTRO de este grupo admin)
@@ -76,6 +78,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/guardias/manual', [GuardiaController::class, 'guardarGuardiaManual'])->name('guardias.manual');
     Route::delete('/guardias/vaciar-mes', [GuardiaController::class, 'vaciarMes'])->name('guardias.vaciarMes');
     Route::post('/guardias/permutar', [GuardiaController::class, 'permutar'])->name('guardias.permutar');
+
+    // Gestión global de Festivos del Tenant
+    Route::get('/festivos', [FestivoController::class, 'index'])->name('festivos.index');
+    Route::post('/festivos', [FestivoController::class, 'store'])->name('festivos.store');
+    Route::delete('/festivos/{festivo}', [FestivoController::class, 'destroy'])->name('festivos.destroy');
     
     // Operaciones sobre una guardia específica (Comodín al final)
     Route::delete('/guardias/{guardia}', [GuardiaController::class, 'destroy'])->name('guardias.destroy');

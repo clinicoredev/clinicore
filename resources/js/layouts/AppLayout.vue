@@ -4,7 +4,7 @@ import { usePage, Link, router } from '@inertiajs/vue3';
 import { 
     LayoutDashboard, CalendarDays, Users, LogOut, 
     Activity, CalendarClock, Layers, Building2, ShieldAlert,
-    Menu, X, Bell, GraduationCap, UserCog // Añadimos los iconos para el menú móvil
+    Menu, X, Bell, GraduationCap, UserCog, PartyPopper
 } from '@lucide/vue';
 
 const page = usePage();
@@ -16,25 +16,56 @@ const menuAbierto = ref(false);
 // Estado para controlar si el desplegable de notificaciones está abierto
 const mostrarNotificaciones = ref(false);
 
+// MENÚ REESTRUCTURADO POR SECCIONES PARA MEJORAR LA UX
 const menuNavegacion = computed(() => {
     if (user?.es_superadmin) {
         return [
-            { name: 'Consola Global SaaS', href: '/dashboard', icon: LayoutDashboard },
-            { name: 'Fábrica de Tenants', href: '/admin/tenants', icon: Building2 },
-            { name: 'Registro de Auditoría', href: '/auditoria', icon: ShieldAlert },
-            // Puedes añadirlo aquí también si quieres que el SuperAdmin tenga acceso directo a su perfil
-            { name: 'Mi Perfil', href: '/settings/profile', icon: UserCog }, 
+            {
+                titulo: 'Administración SaaS',
+                items: [
+                    { name: 'Consola Global SaaS', href: '/dashboard', icon: LayoutDashboard },
+                    { name: 'Fábrica de Tenants', href: '/admin/tenants', icon: Building2 },
+                    { name: 'Registro de Auditoría', href: '/auditoria', icon: ShieldAlert },
+                ]
+            },
+            {
+                titulo: 'Cuenta',
+                items: [
+                    { name: 'Mi Perfil', href: '/settings/profile', icon: UserCog }, 
+                ]
+            }
         ];
     }
 
     return [
-        { name: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
-        { name: 'Calendario Completo', href: '/calendario-completo', icon: Layers },
-        { name: 'Guardias Adjuntos', href: '/guardias', icon: CalendarDays },
-        { name: 'Guardias Residentes', href: '/residentes/guardias', icon: GraduationCap },
-        { name: 'Directorio Facultativo', href: '/personal', icon: Users },
-        { name: 'Permisos y Ausencias', href: '/ausencias', icon: CalendarClock },
-        { name: 'Ajustes de Perfil', href: '/settings/profile', icon: UserCog },
+        {
+            titulo: 'Visión Global',
+            items: [
+                { name: 'Panel Principal', href: '/dashboard', icon: LayoutDashboard },
+                { name: 'Calendario Completo', href: '/calendario-completo', icon: Layers },
+            ]
+        },
+        {
+            titulo: 'Cuadrantes',
+            items: [
+                { name: 'Guardias Adjuntos', href: '/guardias', icon: CalendarDays },
+                { name: 'Guardias Residentes', href: '/residentes/guardias', icon: GraduationCap },
+            ]
+        },
+        {
+            titulo: 'Gestión del Servicio',
+            items: [
+                { name: 'Festivos Oficiales', href: '/festivos', icon: PartyPopper },
+                { name: 'Directorio Facultativo', href: '/personal', icon: Users },
+                { name: 'Permisos y Ausencias', href: '/ausencias', icon: CalendarClock },
+            ]
+        },
+        {
+            titulo: 'Personal',
+            items: [
+                { name: 'Ajustes de Perfil', href: '/settings/profile', icon: UserCog },
+            ]
+        }
     ];
 });
 
@@ -42,7 +73,7 @@ const marcarLeidas = () => {
     router.post('/notificaciones/marcar-leidas', {}, {
         preserveScroll: true,
         onSuccess: () => {
-            mostrarNotificaciones.value = false; // Cierra el cajoncito al terminar
+            mostrarNotificaciones.value = false;
         }
     });
 };
@@ -51,50 +82,64 @@ const marcarLeidas = () => {
 <template>
     <div class="min-h-screen bg-zinc-950 text-zinc-100 flex overflow-hidden">
         
-        <!-- BACKDROP MÓVIL: Oscurece el fondo cuando el menú está abierto -->
+        <!-- BACKDROP MÓVIL -->
         <div 
             v-if="menuAbierto" 
             @click="menuAbierto = false"
             class="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm md:hidden transition-opacity"
         ></div>
         
-        <!-- SIDEBAR: Oculto en móvil (fuera de la pantalla), fijo a la izquierda. En Desktop es estático. -->
+        <!-- SIDEBAR -->
         <aside 
             :class="[
                 'fixed inset-y-0 left-0 z-50 w-64 border-r border-zinc-800 bg-zinc-900/95 md:bg-zinc-900/50 flex flex-col justify-between transition-transform duration-300 ease-in-out md:translate-x-0 md:static',
                 menuAbierto ? 'translate-x-0' : '-translate-x-full'
             ]"
         >
-            <div>
-                <div class="h-16 flex items-center justify-between px-6 border-b border-zinc-800">
+            <div class="flex-1 flex flex-col min-h-0">
+                <!-- LOGO HEADER -->
+                <div class="h-16 flex items-center justify-between px-6 border-b border-zinc-800 shrink-0">
                     <div class="flex items-center gap-3">
                         <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
                             <Activity class="w-6 h-6" />
                         </div>
                         <span class="font-bold tracking-wide text-lg">CliniCore</span>
                     </div>
-                    <!-- Botón cerrar solo visible en móvil -->
                     <button @click="menuAbierto = false" class="md:hidden p-1 text-zinc-400 hover:text-white rounded-md hover:bg-zinc-800">
                         <X class="w-5 h-5" />
                     </button>
                 </div>
 
-                <nav class="p-4 space-y-1">
-                    <!-- Añadimos @click="menuAbierto = false" para que el menú se cierre al navegar en móvil -->
-                    <Link 
-                        v-for="item in menuNavegacion" 
-                        :key="item.name" 
-                        :href="item.href"
-                        @click="menuAbierto = false"
-                        class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60"
-                    >
-                        <component :is="item.icon" class="w-5 h-5 text-zinc-400" />
-                        {{ item.name }}
-                    </Link>
+                <!-- NAVEGACIÓN AGRUPADA POR SECCIONES -->
+                <nav class="flex-1 overflow-y-auto p-4 hide-scrollbar">
+                    <div v-for="(seccion, index) in menuNavegacion" :key="seccion.titulo" :class="index !== 0 ? 'mt-6' : ''">
+                        
+                        <!-- Encabezado de la Sección -->
+                        <span class="block px-3 text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-2">
+                            {{ seccion.titulo }}
+                        </span>
+                        
+                        <!-- Enlaces de la Sección -->
+                        <div class="space-y-1">
+                            <Link 
+                                v-for="item in seccion.items" 
+                                :key="item.name" 
+                                :href="item.href"
+                                @click="menuAbierto = false"
+                                class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+                                :class="$page.url.startsWith(item.href) ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'"
+                            >
+                                <component :is="item.icon" class="w-5 h-5" :class="$page.url.startsWith(item.href) ? 'text-emerald-400' : 'text-zinc-400'" />
+                                {{ item.name }}
+                            </Link>
+                        </div>
+
+                    </div>
                 </nav>
             </div>
 
-            <div class="p-4 border-t border-zinc-800 bg-zinc-900">
+            <!-- TARJETA DE USUARIO INFERIOR -->
+            <div class="p-4 border-t border-zinc-800 bg-zinc-900 shrink-0">
                 <div class="flex items-center justify-between">
                     <div class="flex flex-col overflow-hidden">
                         <span class="text-sm font-medium truncate">{{ user.name }}</span>
@@ -116,7 +161,7 @@ const marcarLeidas = () => {
 
         <!-- ÁREA DE CONTENIDO PRINCIPAL -->
         <main class="flex-1 flex flex-col min-w-0 h-screen">
-            <!-- CABECERA: Añadido el botón de menú hamburguesa a la izquierda -->
+            <!-- CABECERA -->
             <header class="h-16 border-b border-zinc-800 px-4 sm:px-8 flex items-center justify-between bg-zinc-900/20 shrink-0">
                 <div class="flex items-center gap-3">
                     <button 
@@ -130,20 +175,17 @@ const marcarLeidas = () => {
                     </h1>
                 </div>
                 
-                <!-- DENTRO DEL HEADER, A LA DERECHA -->
                 <div class="flex items-center gap-4 shrink-0">
                     
                     <!-- SISTEMA DE NOTIFICACIONES -->
                     <div class="relative">
                         <button @click="mostrarNotificaciones = !mostrarNotificaciones" class="relative p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors">
                             <Bell class="w-5 h-5" />
-                            <!-- Globo rojo del contador (USANDO ? PARA EVITAR CRASHES) -->
                             <span v-if="($page.props.auth?.notificaciones_count || 0) > 0" class="absolute top-1.5 right-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white ring-2 ring-zinc-900">
                                 {{ $page.props.auth.notificaciones_count }}
                             </span>
                         </button>
 
-                        <!-- DESPLEGABLE DE NOTIFICACIONES -->
                         <div v-if="mostrarNotificaciones" class="absolute right-0 mt-2 w-80 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
                             <div class="p-3 border-b border-zinc-800 bg-zinc-950/50 flex justify-between items-center">
                                 <span class="text-sm font-bold text-white">Notificaciones</span>
@@ -157,7 +199,6 @@ const marcarLeidas = () => {
                             </div>
                             
                             <div class="max-h-80 overflow-y-auto">
-                                <!-- USANDO ? PARA EVITAR CRASHES SI EL ARRAY NO EXISTE -->
                                 <div v-if="!$page.props.auth?.notificaciones || $page.props.auth.notificaciones.length === 0" class="p-6 text-center text-xs text-zinc-500 italic">
                                     No tienes notificaciones nuevas.
                                 </div>
@@ -176,14 +217,13 @@ const marcarLeidas = () => {
                         </div>
                     </div>
 
-                    <!-- Tu badge de SaaS v1.0 -->
                     <span class="hidden sm:inline-block px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                         SaaS v1.0
                     </span>
                 </div>
             </header>
 
-            <!-- CONTENEDOR VISTAS VUE: Paddings dinámicos -->
+            <!-- CONTENEDOR VISTAS VUE -->
             <div class="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto">
                 <slot />
             </div>
@@ -203,3 +243,13 @@ const marcarLeidas = () => {
         
     </div>
 </template>
+
+<style scoped>
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+</style>

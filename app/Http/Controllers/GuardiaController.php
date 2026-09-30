@@ -6,6 +6,7 @@ use App\Exports\GuardiasExport;
 use App\Models\Ausencia;
 use App\Models\Guardia;
 use App\Models\LimitacionGuardia;
+use App\Models\Festivo; // <--- IMPORTANTE: Modelo de Festivos
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -68,7 +69,7 @@ class GuardiaController extends Controller
                 'fecha_formateada' => Carbon::parse($g->fecha)->format('d/m/Y'),
                 'dia_semana' => ucfirst(Carbon::parse($g->fecha)->locale('es')->dayName),
                 'tipo' => $g->tipo,
-                'tipo_badge' => $g->tipo === 'festivo_24h' ? '24h (Fin de semana)' : '17h (Diaria)',
+                'tipo_badge' => $g->tipo === 'festivo_24h' ? '24h (Finde/Festivo)' : '17h (Diaria)',
                 'es_finde' => $g->tipo === 'festivo_24h',
                 'is_manual' => (bool)$g->is_manual,
                 'observaciones' => $g->observaciones
@@ -109,6 +110,18 @@ class GuardiaController extends Controller
                 'motivo' => $a->motivo ?: 'Ausencia justificada'
             ]);
 
+        // Extraer los festivos del mes para enviarlos al Frontend
+        $festivosDelMes = Festivo::where('especialidad_id', $usuario->especialidad_id)
+            ->whereMonth('fecha', $mes)
+            ->whereYear('fecha', $anio)
+            ->orderBy('fecha')
+            ->get()
+            ->map(fn($f) => [
+                'id' => $f->id,
+                'fecha' => Carbon::parse($f->fecha)->format('Y-m-d'),
+                'descripcion' => $f->descripcion
+            ]);
+
         $equidad = $medicos->map(function ($medico) use ($guardias) {
             $misGuardias = $guardias->where('user_id', $medico->id);
             return [
@@ -120,6 +133,7 @@ class GuardiaController extends Controller
 
         return inertia('Guardias/Index', [
             'guardias' => $guardias, 'limitaciones' => $limitaciones, 'ausencias_mes' => $ausenciasMes,
+            'festivos' => $festivosDelMes, // NUEVA VARIABLE
             'medicos' => $medicos, 'equidad' => $equidad, 'permisos' => ['es_jefe' => $usuario->hasRole('Jefe de Servicio')],
             'mes_actual' => (int)$mes, 'anio_actual' => (int)$anio,
         ]);
@@ -197,15 +211,8 @@ class GuardiaController extends Controller
         
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        // RECUPERADO: Solo filtra a los médicos si se ha enviado el array de seleccionados.
-        $medicos = User::where('especialidad_id', $jefe->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
-            ->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))
-            ->get();
-
-        if ($medicos->count() < $personasPorDia) {
-            return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos seleccionados en la plantilla para cubrir los puestos.']);
-        }
+        $medicos = User::where('especialidad_id', $jefe->especialidad_id)->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))->get();
+        if ($medicos->count() < $personasPorDia) return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos.']);
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth(); $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
@@ -214,11 +221,18 @@ class GuardiaController extends Controller
         $limitaciones = LimitacionGuardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->get();
         $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->whereMonth('fecha', $mes)->whereYear('fecha', $anio)->where('is_manual', true)->get();
 
+        // 0. CARGA DE FESTIVOS DEL TENANT
+        $festivosArr = Festivo::where('especialidad_id', $jefe->especialidad_id)->pluck('fecha')->map(fn($f) => Carbon::parse($f)->format('Y-m-d'))->toArray();
+        $esFindeOFiesta = fn(Carbon $date) => $date->isWeekend() || in_array($date->format('Y-m-d'), $festivosArr);
+
         // 1. CÁLCULO DE CUOTAS MATEMÁTICAS JUSTAS
         $totalSlotsFinde = 0;
+        $totalSlotsDiaria = 0;
         for ($d = 1; $d <= $diasDelMes; $d++) {
             $f = Carbon::createFromDate($anio, $mes, $d);
-            if (in_array($f->dayOfWeekIso, [5, 6, 7])) $totalSlotsFinde += $personasPorDia;
+            // Si es Finde, Fiesta o Viernes (día de anclaje), entra en la cuota "fuerte"
+            if ($esFindeOFiesta($f) || $f->dayOfWeekIso === 5) $totalSlotsFinde += $personasPorDia;
+            else $totalSlotsDiaria += $personasPorDia;
         }
 
         $nMedicos = max(1, $medicos->count());
@@ -272,7 +286,7 @@ class GuardiaController extends Controller
             if (!isset($stats[$gm->user_id])) continue;
             $f = Carbon::parse($gm->fecha);
             $stats[$gm->user_id]['total_mes']++;
-            if (in_array($f->dayOfWeekIso, [5, 6, 7]) || $gm->tipo === 'festivo_24h') {
+            if ($esFindeOFiesta($f) || $gm->tipo === 'festivo_24h') {
                 $stats[$gm->user_id]['findes_mes']++; $stats[$gm->user_id]['puntos_esfuerzo'] += 2;
             } else {
                 $stats[$gm->user_id]['diarias_mes']++; $stats[$gm->user_id]['puntos_esfuerzo'] += 1;
@@ -282,11 +296,11 @@ class GuardiaController extends Controller
         $guardiasAInsertar = [];
 
         $esElegible = function($medicoId, $fechasAAsignar) use (
-            $ausencias, $limitaciones, &$stats, $guardiasManuales,
+            $ausencias, $limitaciones, &$stats, $guardiasManuales, $esFindeOFiesta,
             $respetarSalientes, $distanciaMinimaDias, $maxGuardiasMes, $maxFindesMes, $maxDiariasMes, &$guardiasAInsertar
         ) {
             $nFindes = 0; $nDiarias = 0;
-            foreach ($fechasAAsignar as $f) { if (in_array($f->dayOfWeekIso, [5, 6, 7])) $nFindes++; else $nDiarias++; }
+            foreach ($fechasAAsignar as $f) { if ($esFindeOFiesta($f)) $nFindes++; else $nDiarias++; }
 
             if ($maxGuardiasMes > 0 && $stats[$medicoId]['total_mes'] + count($fechasAAsignar) > $maxGuardiasMes) return false;
             if ($maxFindesMes > 0 && $stats[$medicoId]['findes_mes'] + $nFindes > $maxFindesMes) return false;
@@ -330,13 +344,13 @@ class GuardiaController extends Controller
             return true;
         };
 
-        $getBestDoctorForBlock = function($fechasBloque, $limiteFindeFlexible) use ($medicos, $esElegible, &$stats, $limitesEquidadFinde, $usarMemoriaAnual) {
+        $getBestDoctorForBlock = function($fechasBloque, $limiteFindeFlexible) use ($medicos, $esElegible, &$stats, $limitesEquidadFinde, $usarMemoriaAnual, $esFindeOFiesta) {
             $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fechasBloque));
             if ($candidatos->isEmpty()) return null;
 
-            $candidatosPuntuados = $candidatos->map(function($m) use ($fechasBloque, &$stats, $limiteFindeFlexible, $limitesEquidadFinde, $usarMemoriaAnual) {
+            $candidatosPuntuados = $candidatos->map(function($m) use ($fechasBloque, &$stats, $limiteFindeFlexible, $limitesEquidadFinde, $usarMemoriaAnual, $esFindeOFiesta) {
                 $nFindes = 0;
-                foreach ($fechasBloque as $f) { if (in_array($f->dayOfWeekIso, [5, 6, 7])) $nFindes++; }
+                foreach ($fechasBloque as $f) { if ($esFindeOFiesta($f)) $nFindes++; }
                 
                 $limiteAplicar = $limiteFindeFlexible !== null ? $limiteFindeFlexible : $limitesEquidadFinde[$m->id];
                 $futuroFinde = $stats[$m->id]['findes_mes'] + $nFindes;
@@ -355,57 +369,43 @@ class GuardiaController extends Controller
             return $candidatosPuntuados->sortBy('score')->first()['medico'];
         };
 
-        $asignarBloque = function($medico, $fechas, $motivo) use (&$guardiasAInsertar, &$stats, $jefe) {
+        $asignarBloque = function($medico, $fechas, $motivo) use (&$guardiasAInsertar, &$stats, $jefe, $esFindeOFiesta) {
             foreach ($fechas as $fecha) {
-                $tipoTurno = in_array($fecha->dayOfWeekIso, [6, 7]) ? 'festivo_24h' : 'diaria_17h';
+                $tipoTurno = $esFindeOFiesta($fecha) ? 'festivo_24h' : 'diaria_17h';
                 $guardiasAInsertar[] = [
                     'especialidad_id' => $jefe->especialidad_id, 'user_id' => $medico->id, 'fecha' => $fecha->format('Y-m-d'),
                     'tipo' => $tipoTurno, 'estado' => 'programada', 'is_manual' => false, 'observaciones' => $motivo, 
                     'created_at' => now(), 'updated_at' => now()
                 ];
                 $stats[$medico->id]['total_mes']++;
-                if (in_array($fecha->dayOfWeekIso, [5, 6, 7])) {
-                    $stats[$medico->id]['findes_mes']++; $stats[$medico->id]['puntos_esfuerzo'] += ($tipoTurno === 'festivo_24h' ? 2 : 1);
+                if ($esFindeOFiesta($fecha)) {
+                    $stats[$medico->id]['findes_mes']++; $stats[$medico->id]['puntos_esfuerzo'] += 2;
                 } else {
                     $stats[$medico->id]['diarias_mes']++; $stats[$medico->id]['puntos_esfuerzo'] += 1;
                 }
             }
         };
 
+        // =========================================================================
+        // FASE 1: ASIGNACIÓN ESTRUCTURAL DE FINES DE SEMANA
+        // =========================================================================
         if ($agrupacion !== 'ninguna') {
             $weekends = [];
             for ($d = 1; $d <= $diasDelMes; $d++) {
                 $f = Carbon::createFromDate($anio, $mes, $d);
-                if (in_array($f->dayOfWeekIso, [5, 6, 7])) {
-                    $weekKey = $f->copy()->endOfWeek()->format('Y-m-d');
-                    if (!isset($weekends[$weekKey])) $weekends[$weekKey] = [];
-                    $weekends[$weekKey][] = $f;
-                }
+                if ($f->dayOfWeekIso === 5) $weekends[] = $f;
             }
 
-            foreach ($weekends as $daysInWeekend) {
-                $v = null; $s = null; $d = null;
-                foreach ($daysInWeekend as $day) {
-                    if ($day->dayOfWeekIso === 5) $v = $day;
-                    if ($day->dayOfWeekIso === 6) $s = $day;
-                    if ($day->dayOfWeekIso === 7) $d = $day;
-                }
+            foreach ($weekends as $v) {
+                $s = $v->copy()->addDay();
+                $d = $v->copy()->addDays(2);
+                
+                $fechasBloque = [];
+                if ($agrupacion === 'v_s_d' && $s->month == $mes && $d->month == $mes) $fechasBloque = [$v, $s, $d];
+                elseif ($agrupacion === 's_d' && $s->month == $mes && $d->month == $mes) $fechasBloque = [$s, $d];
+                elseif ($agrupacion === 'v_s' && $s->month == $mes) $fechasBloque = [$v, $s];
 
-                $bloquesAProcesar = [];
-                if ($agrupacion === 'v_s_d') {
-                    if ($v && $s && $d) $bloquesAProcesar[] = [$v, $s, $d];
-                    else {
-                        $parcial = [];
-                        if ($v) $parcial[] = $v; if ($s) $parcial[] = $s; if ($d) $parcial[] = $d;
-                        if (count($parcial) > 1) $bloquesAProcesar[] = $parcial;
-                    }
-                } elseif ($agrupacion === 'v_s') {
-                    if ($v && $s) $bloquesAProcesar[] = [$v, $s];
-                } elseif ($agrupacion === 's_d') {
-                    if ($s && $d) $bloquesAProcesar[] = [$s, $d];
-                }
-
-                foreach ($bloquesAProcesar as $fechasBloque) {
+                if (count($fechasBloque) > 0) {
                     for ($p = 0; $p < $personasPorDia; $p++) {
                         $puestosLibres = true;
                         foreach ($fechasBloque as $fb) {
@@ -416,15 +416,19 @@ class GuardiaController extends Controller
 
                         if ($puestosLibres) {
                             $cand = $getBestDoctorForBlock($fechasBloque, null); 
-                            if (!$cand) $cand = $getBestDoctorForBlock($fechasBloque, 999); 
+                            if (!$cand) $cand = $getBestDoctorForBlock($fechasBloque, 99); 
 
                             if ($cand) {
-                                $asignarBloque($cand, $fechasBloque, 'IA (Bloque ' . strtoupper($agrupacion) . ')');
+                                $motivo = (count($fechasBloque) > 1) ? 'IA (Bloque ' . strtoupper($agrupacion) . ')' : 'IA';
+                                $asignarBloque($cand, $fechasBloque, $motivo);
                             } else {
-                                foreach ($fechasBloque as $fb) {
-                                    $candSingle = $getBestDoctorForBlock([$fb], 999);
-                                    if ($candSingle) $asignarBloque($candSingle, [$fb], 'IA (Split)');
-                                    else return back()->withErrors(['algoritmo' => 'COLAPSO: Imposible cubrir el día ' . $fb->format('d/m/Y')]);
+                                foreach ($fechasBloque as $f) {
+                                    $candSingle = $getBestDoctorForBlock([$f], 99);
+                                    if ($candSingle) {
+                                        $asignarBloque($candSingle, [$f], 'IA (Split de Emergencia)');
+                                    } else {
+                                        return back()->withErrors(['algoritmo' => 'COLAPSO: Imposible cubrir el día ' . $f->format('d/m/Y') . '. Demasiadas bajas o reglas.']);
+                                    }
                                 }
                             }
                         }
@@ -433,6 +437,9 @@ class GuardiaController extends Controller
             }
         }
 
+        // =========================================================================
+        // FASE 2: RELLENO EQUITATIVO DE DÍAS RESTANTES E INYECCIÓN DE FESTIVOS
+        // =========================================================================
         for ($dia = 1; $dia <= $diasDelMes; $dia++) {
             $fecha = Carbon::createFromDate($anio, $mes, $dia);
             
@@ -441,9 +448,14 @@ class GuardiaController extends Controller
                            + collect($guardiasAInsertar)->where('fecha', $fecha->format('Y-m-d'))->count();
                 if ($cubiertos >= $personasPorDia) break;
 
-                $cand = $getBestDoctorForBlock([$fecha], 999);
+                // Para un festivo suelto, aplicamos la regla estricta de Fines de Semana para que no acaparen
+                $limite = $esFindeOFiesta($fecha) ? null : 99; 
+                $cand = $getBestDoctorForBlock([$fecha], $limite);
+                if (!$cand) $cand = $getBestDoctorForBlock([$fecha], 99); // Fallback relaja
+
                 if ($cand) {
-                    $asignarBloque($cand, [$fecha], 'IA');
+                    $motivo = $esFindeOFiesta($fecha) ? 'IA (Festivo/Finde)' : 'IA';
+                    $asignarBloque($cand, [$fecha], $motivo);
                 } else {
                     return back()->withErrors(['algoritmo' => 'COLAPSO: Imposible cubrir el día ' . $fecha->format('d/m/Y') . '. Demasiadas bajas o reglas.']);
                 }
@@ -455,7 +467,7 @@ class GuardiaController extends Controller
             Guardia::insert($guardiasAInsertar);
         });
 
-        return back()->with('success', 'Cuadrante equitativo generado en dos fases.');
+        return back()->with('success', 'Cuadrante generado incorporando festivos de 24h.');
     }
 
     public function borrarTodo(Request $request)

@@ -10,6 +10,7 @@ const props = defineProps({
     guardias: Array,
     limitaciones: Array,
     ausencias_mes: Array,
+    festivos: Array, // INYECTADO SOLO PARA LECTURA VISUAL
     medicos: Array,
     equidad: Array,
     permisos: Object,
@@ -120,13 +121,13 @@ const formGenerador = useForm({
     usar_plantilla_completa: true,
     medicos_incluidos: props.medicos.map(m => m.id),
     respetar_salientes: true,
-    distancia_minima_dias: 2, // 1 = Seguidos, 2 = 1 libre medio, 3 = 48h
+    distancia_minima_dias: 1, // 0 = Seguidos, 1 = Días alternos (Permite 1 libre), 2 = 48h
     max_guardias_mes: 0,      
     max_findes_mes: 0,  
     max_diarias_mes: 0,
     prorratear_ausencias: true,      
     usar_memoria_anual: true,
-    agrupacion: 'ninguna'
+    agrupacion: 'ninguna' // Selector ÚNICO de Bloques
 });
 
 const dispararAlgoritmo = () => {
@@ -164,13 +165,6 @@ const guardarRegla = () => {
     }); 
 };
 
-const guardarGuardiaManual = () => { 
-    formManual.post('/residentes/guardias/manual', { 
-        preserveScroll: true, 
-        onSuccess: () => formManual.reset('user_id', 'fecha') 
-    }); 
-};
-
 // =========================================================================
 // ASIGNACIÓN RÁPIDA (MODAL)
 // =========================================================================
@@ -183,7 +177,7 @@ const abrirModalAsignacion = (celda) => {
     
     formManual.fecha = celda.fecha_vence;
     formManual.user_id = celda.user_id || '';
-    formManual.tipo = celda.tipo || 'diaria_17h';
+    formManual.tipo = celda.es_festivo || celda.es_finde_natural ? 'festivo_24h' : 'diaria_17h'; // IA autodetecta festivo visual
     
     modalAsignacionAbierto.value = true;
 };
@@ -200,7 +194,7 @@ const guardarGuardiaDesdeCalendario = () => {
 };
 
 // =========================================================================
-// MATRIZ DE CALENDARIO FIJA CON VISOR DE REGLAS
+// MATRIZ DE CALENDARIO FIJA CON VISOR DE REGLAS Y FESTIVOS
 // =========================================================================
 const diasMatriz = computed(() => {
     const year = anioFiltro.value;
@@ -232,13 +226,18 @@ const diasMatriz = computed(() => {
     for (let d = 1; d <= totalDias; d++) {
         const fechaObj = new Date(year, month - 1, d);
         const dayOfWeek = fechaObj.getDay(); 
-        const esFinde = (dayOfWeek === 0 || dayOfWeek === 6);
         
         const mm = String(month).padStart(2, '0');
         const dd = String(d).padStart(2, '0');
         const fechaString = `${year}-${mm}-${dd}`;
         
-        // --- VISOR DE REGLAS ---
+        // Comprobar Festivo inyectado desde backend
+        const festivoData = props.festivos?.find(f => f.fecha === fechaString);
+        const esFestivo = !!festivoData;
+        
+        const esFindeNatural = (dayOfWeek === 0 || dayOfWeek === 6);
+        const esFindeVirtual = esFindeNatural || esFestivo; // Rige el color de la celda
+        
         const vetosDelDia = [];
         
         props.limitaciones.forEach(l => {
@@ -271,7 +270,10 @@ const diasMatriz = computed(() => {
         matrizCompleta.push({
             esRelleno: false,
             numero: d,
-            es_finde: esFinde,
+            es_finde: esFindeVirtual,
+            es_finde_natural: esFindeNatural,
+            es_festivo: esFestivo,
+            nombre_festivo: festivoData ? festivoData.descripcion : '',
             fecha_vence: fechaString,
             tiene_guardia: !!(mapaGuardias[d] && mapaGuardias[d].length > 0),
             guardias_dia: mapaGuardias[d] || [],
@@ -316,7 +318,7 @@ const diasMatriz = computed(() => {
             <div class="p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
                 <div class="space-y-1">
                     <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] sm:text-xs font-mono font-bold">
-                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v5.0 (CUOTAS JUSTAS)
+                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v5.1 (SOPORTE FESTIVOS LECTURA)
                     </div>
                     <h2 class="text-lg sm:text-xl font-bold text-white tracking-tight">Planificador de Residentes</h2>
                 </div>
@@ -349,7 +351,7 @@ const diasMatriz = computed(() => {
                 </div>
 
                 <div v-if="!formGenerador.usar_plantilla_completa" class="pt-1 pb-3 border-b border-zinc-800/60 animate-in fade-in">
-                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Residentes incluidos:</span>
+                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Residentes incluidos en esta corrida:</span>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                         <label v-for="m in medicos" :key="m.id" class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors" :class="formGenerador.medicos_incluidos.includes(m.id) ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500'">
                             <input type="checkbox" :value="m.id" v-model="formGenerador.medicos_incluidos" class="hidden">
@@ -389,7 +391,6 @@ const diasMatriz = computed(() => {
                             </div>
                         </div>
 
-                        <!-- NUEVA CAJA: AGRUPACIÓN SELECTOR ÚNICO -->
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2 col-span-1 md:col-span-2 lg:col-span-2">
                             <label class="block text-[10px] font-bold text-white mb-1 uppercase tracking-wider">Agrupación Equitativa</label>
                             <select v-model="formGenerador.agrupacion" class="w-full bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-2 py-1.5 text-xs font-bold outline-none focus:border-purple-500">
@@ -470,9 +471,6 @@ const diasMatriz = computed(() => {
             <button @click="pestanaActual = 'reglas'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'reglas' ? 'border-purple-500 text-purple-400' : 'border-transparent text-zinc-400'">
                 <Ban class="w-3.5 h-3.5" /> Reglas ({{ totalReglasVisibles }})
             </button>
-            <button v-if="permisos.es_jefe" @click="pestanaActual = 'manual'" class="whitespace-nowrap pb-3 px-3 sm:px-4 font-semibold text-[11px] sm:text-sm flex items-center gap-1.5 border-b-2 cursor-pointer" :class="pestanaActual === 'manual' ? 'border-purple-500 text-purple-400' : 'border-transparent text-zinc-400'">
-                <Pin class="w-3.5 h-3.5" /> Manual
-            </button>
         </div>
 
         <!-- Pestaña 1: Cuadrante Equidad -->
@@ -483,7 +481,7 @@ const diasMatriz = computed(() => {
                         <div class="text-zinc-300 font-bold truncate text-[10px] sm:text-xs">{{ eq.nombre }}</div>
                         <div class="mt-1 flex justify-between text-[9px] sm:text-[11px]">
                             <span class="text-zinc-500">Total: <b class="text-white">{{ eq.totales }}</b></span>
-                            <span class="text-purple-500">Finde: <b class="text-purple-400">{{ eq.findes }}</b></span>
+                            <span class="text-purple-500">Finde/Festivo: <b class="text-purple-400">{{ eq.findes }}</b></span>
                         </div>
                     </div>
                 </div>
@@ -552,6 +550,11 @@ const diasMatriz = computed(() => {
 
                     <div v-if="!celda.esRelleno" class="flex-1 flex flex-col gap-1 z-10 relative overflow-y-auto hide-scrollbar">
                         
+                        <!-- CHAPA DE FESTIVO LECTURA -->
+                        <div v-if="celda.es_festivo" class="text-[8px] sm:text-[9px] font-bold text-rose-400 bg-rose-500/10 px-1 py-0.5 rounded text-center truncate w-full mb-1">
+                            🎉 {{ celda.nombre_festivo || 'Festivo' }}
+                        </div>
+
                         <!-- REGLAS Y AUSENCIAS DEL DÍA -->
                         <div v-if="celda.vetos_dia.length > 0" class="flex flex-col gap-0.5 mb-1 px-0.5">
                             <div v-for="veto in celda.vetos_dia" :key="veto.id" class="px-1 py-0.5 rounded text-[8px] sm:text-[9px] font-bold flex items-center gap-1 truncate" :class="veto.es_ausencia ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-orange-500/10 text-orange-400 border border-orange-500/20'" :title="veto.motivo">
@@ -681,23 +684,6 @@ const diasMatriz = computed(() => {
             </div>
         </div>
 
-        <div v-if="pestanaActual === 'manual' && permisos.es_jefe" class="max-w-md w-full bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-800 mx-auto animate-in fade-in">
-            <form @submit.prevent="guardarGuardiaManual" class="space-y-4">
-                <select v-model="formManual.user_id" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
-                    <option value="" disabled selected>Residente...</option>
-                    <option v-for="m in medicos" :key="m.id" :value="m.id">{{ m.name }}</option>
-                </select>
-                <input v-model="formManual.fecha" required type="date" class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 font-mono text-xs sm:text-sm outline-none" />
-                <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
-                    <option value="diaria_17h">Diario (17h)</option>
-                    <option value="festivo_24h">Festivo (24h)</option>
-                </select>
-                <button type="submit" :disabled="formManual.processing" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-xs flex justify-center gap-2 cursor-pointer disabled:opacity-50">
-                    <Pin class="w-4 h-4" /> Fijar Turno
-                </button>
-            </form>
-        </div>
-
         <div v-if="modalAsignacionAbierto" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
             <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl animate-in slide-in-from-top-4">
                 <div class="p-4 bg-zinc-950 border-b border-zinc-800 flex justify-between items-center">
@@ -721,7 +707,7 @@ const diasMatriz = computed(() => {
                             <label class="block text-xs font-bold text-zinc-400 uppercase mb-1.5 tracking-wider">Tipo de Guardia</label>
                             <select v-model="formManual.tipo" required class="w-full bg-zinc-950 text-white p-2.5 rounded-xl border border-zinc-800 text-xs sm:text-sm outline-none">
                                 <option value="diaria_17h">Diario (17h)</option>
-                                <option value="festivo_24h">Festivo (24h)</option>
+                                <option value="festivo_24h">Festivo/Finde (24h)</option>
                             </select>
                         </div>
                         <div class="pt-2 flex gap-2">
