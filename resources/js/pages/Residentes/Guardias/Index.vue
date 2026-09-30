@@ -9,7 +9,7 @@ import {
 const props = defineProps({
     guardias: Array,
     limitaciones: Array,
-    ausencias_mes: Array, // INYECTADO PARA EL VISOR DEL CALENDARIO
+    ausencias_mes: Array,
     medicos: Array,
     equidad: Array,
     permisos: Object,
@@ -120,12 +120,13 @@ const formGenerador = useForm({
     usar_plantilla_completa: true,
     medicos_incluidos: props.medicos.map(m => m.id),
     respetar_salientes: true,
-    distancia_minima_dias: 2, 
+    distancia_minima_dias: 2, // 1 = Seguidos, 2 = 1 libre medio, 3 = 48h
     max_guardias_mes: 0,      
-    max_findes_mes: 0,
+    max_findes_mes: 0,  
     max_diarias_mes: 0,
-    prorratear_ausencias: true,
-    usar_memoria_anual: true  
+    prorratear_ausencias: true,      
+    usar_memoria_anual: true,
+    agrupacion: 'ninguna'
 });
 
 const dispararAlgoritmo = () => {
@@ -287,13 +288,13 @@ const diasMatriz = computed(() => {
     <div class="space-y-4 sm:space-y-6 relative max-w-full overflow-hidden">
         
         <!-- ALERTA DE CONFLICTO / ERROR DE PERMUTA / MANUAL -->
-        <div v-if="$page.props.errors.conflicto" class="p-4 bg-rose-500/20 border-2 border-rose-500/50 rounded-xl sm:rounded-2xl flex items-center gap-3 text-rose-200 animate-in fade-in zoom-in">
+        <div v-if="$page.props.errors.conflicto || $page.props.errors.algoritmo" class="p-4 bg-rose-500/20 border-2 border-rose-500/50 rounded-xl sm:rounded-2xl flex items-center gap-3 text-rose-200 animate-in fade-in zoom-in">
             <ShieldAlert class="w-6 h-6 text-rose-400 shrink-0" />
             <div>
                 <span class="font-bold text-rose-400 uppercase text-[10px] sm:text-xs tracking-wider block">Bloqueo de Seguridad</span>
-                <p class="text-xs sm:text-sm font-medium mt-0.5">{{ $page.props.errors.conflicto }}</p>
+                <p class="text-xs sm:text-sm font-medium mt-0.5">{{ $page.props.errors.conflicto || $page.props.errors.algoritmo }}</p>
             </div>
-            <button @click="$page.props.errors.conflicto = null" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer transition-colors">
+            <button @click="$page.props.errors.conflicto = null; $page.props.errors.algoritmo = null" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer transition-colors">
                 <X class="w-5 h-5"/>
             </button>
         </div>
@@ -315,7 +316,7 @@ const diasMatriz = computed(() => {
             <div class="p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
                 <div class="space-y-1">
                     <div class="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-400 text-[10px] sm:text-xs font-mono font-bold">
-                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v3.0 (MODO FORMACIÓN)
+                        <Cpu class="w-3.5 h-3.5 animate-spin" /> MOTOR CSP v5.0 (CUOTAS JUSTAS)
                     </div>
                     <h2 class="text-lg sm:text-xl font-bold text-white tracking-tight">Planificador de Residentes</h2>
                 </div>
@@ -348,7 +349,7 @@ const diasMatriz = computed(() => {
                 </div>
 
                 <div v-if="!formGenerador.usar_plantilla_completa" class="pt-1 pb-3 border-b border-zinc-800/60 animate-in fade-in">
-                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Residentes incluidos en esta corrida:</span>
+                    <span class="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3">Residentes incluidos:</span>
                     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                         <label v-for="m in medicos" :key="m.id" class="flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors" :class="formGenerador.medicos_incluidos.includes(m.id) ? 'bg-purple-500/10 border-purple-500/30 text-purple-400' : 'bg-zinc-900 border-zinc-800 text-zinc-500'">
                             <input type="checkbox" :value="m.id" v-model="formGenerador.medicos_incluidos" class="hidden">
@@ -362,13 +363,12 @@ const diasMatriz = computed(() => {
                     <span class="block text-xs font-bold text-purple-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                         <Sliders class="w-3.5 h-3.5" /> Reglas y Parámetros del Algoritmo:
                     </span>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-3">
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
                             <label class="block text-xs font-bold text-white mb-1">Simultáneos</label>
                             <div class="flex items-center gap-2">
                                 <input type="number" min="1" max="10" v-model="formGenerador.personas_por_dia" class="w-16 bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-2 py-1 text-xs font-bold font-mono outline-none focus:border-purple-500">
-                                <span class="text-[10px] text-zinc-500">(Puestos / día)</span>
                             </div>
                         </div>
                         
@@ -380,12 +380,24 @@ const diasMatriz = computed(() => {
                                 </span>
                             </label>
                             <div v-if="formGenerador.respetar_salientes" class="pl-6 text-[11px] text-zinc-400 flex items-center gap-2">
-                                <select v-model="formGenerador.distancia_minima_dias" class="bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-purple-500">
-                                    <option :value="2">24h libres</option>
-                                    <option :value="3">48h libres</option>
-                                    <option :value="4">72h libres</option>
+                                <select v-model="formGenerador.distancia_minima_dias" class="w-full bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-1.5 py-0.5 text-xs font-bold outline-none focus:border-purple-500">
+                                    <option :value="0">0 días libres (Seguidos)</option>
+                                    <option :value="1">1 día libre en medio (Días alternos)</option>
+                                    <option :value="2">2 días libres en medio (48h)</option>
+                                    <option :value="3">3 días libres en medio (72h)</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <!-- NUEVA CAJA: AGRUPACIÓN SELECTOR ÚNICO -->
+                        <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2 col-span-1 md:col-span-2 lg:col-span-2">
+                            <label class="block text-[10px] font-bold text-white mb-1 uppercase tracking-wider">Agrupación Equitativa</label>
+                            <select v-model="formGenerador.agrupacion" class="w-full bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-2 py-1.5 text-xs font-bold outline-none focus:border-purple-500">
+                                <option value="ninguna">Sin agrupar (Individuales)</option>
+                                <option value="v_s">Viernes + Sábado (V+S)</option>
+                                <option value="s_d">Sábado + Domingo (S+D)</option>
+                                <option value="v_s_d">Viernes + Sábado + Domingo (V+S+D)</option>
+                            </select>
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
@@ -396,7 +408,7 @@ const diasMatriz = computed(() => {
                         </div>
 
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-1">
-                            <label class="block text-[10px] font-bold text-white mb-1">Max Diarias / Findes</label>
+                            <label class="block text-[10px] font-bold text-white mb-1">Limitar por Tipo</label>
                             <div class="flex items-center gap-2 mb-1">
                                 <span class="text-[10px] text-zinc-500 w-8">Lun-Vie:</span>
                                 <input type="number" min="0" max="10" v-model="formGenerador.max_diarias_mes" class="w-12 bg-zinc-950 border border-zinc-700 text-purple-400 rounded px-1.5 py-0.5 text-xs font-bold font-mono outline-none focus:border-purple-500">
@@ -410,11 +422,11 @@ const diasMatriz = computed(() => {
                         <div class="p-3 bg-zinc-900/80 border border-zinc-800 rounded-xl space-y-2 col-span-1 md:col-span-2 lg:col-span-1">
                             <label class="flex items-center gap-2 cursor-pointer mb-2">
                                 <input type="checkbox" v-model="formGenerador.prorratear_ausencias" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-purple-500 focus:ring-purple-500">
-                                <span class="text-[10px] font-bold text-white leading-tight">Prorratear Ausencias</span>
+                                <span class="text-[10px] font-bold text-white leading-tight">Prorrateo Bajas</span>
                             </label>
                             <label class="flex items-center gap-2 cursor-pointer">
                                 <input type="checkbox" v-model="formGenerador.usar_memoria_anual" class="w-4 h-4 rounded border-zinc-700 bg-zinc-950 text-purple-500 focus:ring-purple-500">
-                                <span class="text-[10px] font-bold text-white leading-tight">Memoria Anual YTD</span>
+                                <span class="text-[10px] font-bold text-white leading-tight">Memoria YTD</span>
                             </label>
                         </div>
 
