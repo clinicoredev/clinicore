@@ -22,7 +22,7 @@ const form = useForm({
     tipo: 'congreso',
     fecha_inicio: hoy,
     fecha_fin: hoy,
-    motivo: 'Ponente principal en mesa redonda de actualización clínica.'
+    motivo: 'Ausencia justificada.'
 });
 
 const abrirModalCreacion = () => {
@@ -162,7 +162,6 @@ const resolverPeticion = (id, nuevoEstado) => {
                             <td class="py-4 px-6 text-right">
                                 <div class="flex flex-col items-end gap-2">
                                     
-                                    <!-- Controles del Jefe para Aprobar/Denegar -->
                                     <div v-if="permisos.es_jefe && item.estado === 'pendiente'" class="inline-flex items-center gap-2">
                                         <button @click="resolverPeticion(item.id, 'aprobada')" title="Autorizar permiso" class="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-zinc-950 transition-all border border-emerald-500/30 cursor-pointer">
                                             <CheckCircle2 class="w-4 h-4" />
@@ -176,7 +175,6 @@ const resolverPeticion = (id, nuevoEstado) => {
                                         Firmado por: <span class="text-zinc-400 font-medium">{{ item.revisor }}</span>
                                     </div>
 
-                                    <!-- Controles de Edición/Borrado -->
                                     <div v-if="item.estado === 'pendiente' || permisos.es_jefe" class="inline-flex items-center gap-1.5">
                                         <button @click="abrirModalEdicion(item)" title="Editar" class="p-1.5 text-zinc-400 hover:text-blue-400 rounded-lg hover:bg-zinc-800 transition-colors cursor-pointer">
                                             <Pencil class="w-3.5 h-3.5" />
@@ -202,7 +200,7 @@ const resolverPeticion = (id, nuevoEstado) => {
                 <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-4 bg-zinc-950/50">
                     <h3 class="font-semibold text-white flex items-center gap-2">
                         <CalendarPlus class="w-4 h-4 text-emerald-400" />
-                        {{ editandoId ? 'Editar Solicitud' : 'Tramitar Ausencia / Congreso' }}
+                        {{ editandoId ? 'Editar Solicitud' : 'Tramitar Ausencia' }}
                     </h3>
                     <button @click="modalAbierto = false" class="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800">
                         <X class="w-5 h-5" />
@@ -214,7 +212,7 @@ const resolverPeticion = (id, nuevoEstado) => {
                     <div v-if="permisos.es_jefe">
                         <label class="block text-xs font-medium text-amber-400 uppercase mb-1">Registrar en nombre de (Facultativo)</label>
                         <select v-model="form.user_id" required class="w-full rounded-lg bg-amber-950/20 border border-amber-500/30 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-500">
-                            <option v-for="medico in medicos" :key="medico.id" :value="medico.id">
+                            <option v-for="medico in medicos" :key="medico.id" :value="medico.id" class="bg-zinc-900 text-white">
                                 {{ medico.name }}
                             </option>
                         </select>
@@ -223,10 +221,12 @@ const resolverPeticion = (id, nuevoEstado) => {
                     <div>
                         <label class="block text-xs font-medium text-zinc-400 uppercase mb-1">Tipo de Permiso</label>
                         <select v-model="form.tipo" class="w-full rounded-lg bg-zinc-950 border border-zinc-800 px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
-                            <option value="congreso">Asistencia a Congreso / Actividad Científica</option>
-                            <option value="vacaciones">Vacaciones ordinarias</option>
-                            <option value="asuntos_propios">Día de asuntos propios</option>
-                            <option value="baja_medica">Incapacidad Temporal / Baja médica</option>
+                            <option value="congreso" class="bg-zinc-900">Asistencia a Congreso / Actividad Científica</option>
+                            <option value="vacaciones" class="bg-zinc-900">Vacaciones ordinarias</option>
+                            <option value="asuntos_propios" class="bg-zinc-900">Día de asuntos propios</option>
+                            <option value="baja_medica" class="bg-zinc-900">Incapacidad Temporal / Baja médica</option>
+                            <option value="rotacion" class="bg-zinc-900">Rotación (Bloquea guardias)</option>
+                            <option value="rotacion_con_guardias" class="bg-zinc-900">Rotación Externa (Mantiene guardias)</option>
                         </select>
                     </div>
 

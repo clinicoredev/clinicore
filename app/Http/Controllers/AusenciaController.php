@@ -25,13 +25,13 @@ class AusenciaController extends Controller
         $ausencias = $query->latest()->get()->map(function ($a) {
             return [
                 'id' => $a->id,
-                'user_id' => $a->user_id, // Necesario para el formulario de edición
+                'user_id' => $a->user_id,
                 'tipo' => ucfirst(str_replace('_', ' ', $a->tipo)),
-                'tipo_raw' => $a->tipo, // Necesario para el selector <select>
+                'tipo_raw' => $a->tipo,
                 'solicitante' => $a->solicitante->name,
                 'revisor' => $a->revisor?->name ?? 'Pendiente de firma',
-                'fecha_inicio' => $a->fecha_inicio->format('Y-m-d'), // Crudo para el <input type="date">
-                'fecha_fin' => $a->fecha_fin->format('Y-m-d'),       // Crudo para el <input type="date">
+                'fecha_inicio' => $a->fecha_inicio->format('Y-m-d'),
+                'fecha_fin' => $a->fecha_fin->format('Y-m-d'),
                 'fechas' => $a->fecha_inicio->format('d/m/Y') . ' al ' . $a->fecha_fin->format('d/m/Y'),
                 'dias_totales' => $a->fecha_inicio->diffInDays($a->fecha_fin) + 1,
                 'motivo' => $a->motivo ?? 'Sin especificar',
@@ -57,7 +57,8 @@ class AusenciaController extends Controller
 
         $validated = $request->validate([
             'user_id' => [$esJefe ? 'required' : 'nullable', 'exists:users,id'],
-            'tipo' => ['required', Rule::in(['congreso', 'vacaciones', 'asuntos_propios', 'baja_medica'])],
+            // NUEVO: Añadidos los tipos de rotación
+            'tipo' => ['required', Rule::in(['congreso', 'vacaciones', 'asuntos_propios', 'baja_medica', 'rotacion', 'rotacion_con_guardias'])],
             'fecha_inicio' => ['required', 'date', $esJefe ? '' : 'after_or_equal:today'],
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
             'motivo' => ['nullable', 'string', 'max:500'],
@@ -87,13 +88,11 @@ class AusenciaController extends Controller
         return back();
     }
 
-    // NUEVO: MODIFICAR SOLICITUD
     public function update(Request $request, Ausencia $ausencia)
     {
         $usuario = $request->user();
         $esJefe = $usuario->hasRole('Jefe de Servicio');
 
-        // Seguridad B2B (Mismo hospital)
         if ($ausencia->especialidad_id !== $usuario->especialidad_id) abort(403);
         
         if (!$esJefe) {
@@ -102,18 +101,17 @@ class AusenciaController extends Controller
         }
 
         $validated = $request->validate([
-            'tipo' => ['required', Rule::in(['congreso', 'vacaciones', 'asuntos_propios', 'baja_medica'])],
+            // NUEVO: Añadidos los tipos de rotación
+            'tipo' => ['required', Rule::in(['congreso', 'vacaciones', 'asuntos_propios', 'baja_medica', 'rotacion', 'rotacion_con_guardias'])],
             'fecha_inicio' => ['required', 'date'],
             'fecha_fin' => ['required', 'date', 'after_or_equal:fecha_inicio'],
             'motivo' => ['nullable', 'string', 'max:500'],
         ]);
 
-        // Si la edita el jefe, podemos forzar un estado si queremos, pero lo normal es solo actualizar datos.
         $ausencia->update($validated);
         return back();
     }
 
-    // NUEVO: ELIMINAR SOLICITUD
     public function destroy(Request $request, Ausencia $ausencia)
     {
         $usuario = $request->user();

@@ -23,6 +23,7 @@ class GuardiaController extends Controller
         
         $ausencia = Ausencia::where('user_id', $userId)
             ->where('estado', 'aprobada')
+            ->where('tipo', '!=', 'rotacion_con_guardias')
             ->where('fecha_inicio', '<=', $fecha->format('Y-m-d'))
             ->where('fecha_fin', '>=', $fecha->format('Y-m-d'))
             ->exists();
@@ -217,7 +218,7 @@ class GuardiaController extends Controller
         $idsAdjuntos = $medicos->pluck('id')->toArray();
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth(); $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
 
-        $ausencias = Ausencia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->where('estado', 'aprobada')->where('fecha_inicio', '<=', $finMes)->where('fecha_fin', '>=', $inicioMes)->get();
+        $ausencias = Ausencia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->where('estado', 'aprobada')->where('tipo', '!=', 'rotacion_con_guardias')->where('fecha_inicio', '<=', $finMes)->where('fecha_fin', '>=', $inicioMes)->get();
         $limitaciones = LimitacionGuardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->get();
         $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsAdjuntos)->whereMonth('fecha', $mes)->whereYear('fecha', $anio)->where('is_manual', true)->get();
 
@@ -313,7 +314,7 @@ class GuardiaController extends Controller
                 if (collect($guardiasAInsertar)->where('user_id', $medicoId)->where('fecha', $fecha->format('Y-m-d'))->count() > 0) return false;
 
                 foreach ($ausencias as $a) {
-                    if ($a->user_id == $medicoId) {
+                    if ($a->user_id == $medicoId && $a->tipo !== 'rotacion_con_guardias') {
                         $inicio = Carbon::parse($a->fecha_inicio)->startOfDay(); $fin = Carbon::parse($a->fecha_fin)->endOfDay();
                         if ($fecha->between($inicio, $fin) || $fecha->isSameDay($fin) || $fecha->isSameDay($fin->copy()->addDay())) return false;
                     }
