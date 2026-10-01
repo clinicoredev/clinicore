@@ -51,7 +51,7 @@ class GuardiaController extends Controller
         $anio = $request->query('anio', now()->year);
 
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
+            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))
             ->get();
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
@@ -212,7 +212,7 @@ class GuardiaController extends Controller
         
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        $medicos = User::where('especialidad_id', $jefe->especialidad_id)->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))->get();
+        $medicos = User::where('especialidad_id', $jefe->especialidad_id)->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))->get();
         if ($medicos->count() < $personasPorDia) return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes facultativos.']);
 
         $idsAdjuntos = $medicos->pluck('id')->toArray();
@@ -477,7 +477,7 @@ class GuardiaController extends Controller
         $jefe = $request->user();
 
         $idsAdjuntos = User::where('especialidad_id', $jefe->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
+            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))
             ->pluck('id')->toArray();
 
         Guardia::where('especialidad_id', $jefe->especialidad_id)
@@ -503,7 +503,7 @@ class GuardiaController extends Controller
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
 
         $idsAdjuntos = User::where('especialidad_id', $request->user()->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
+            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))
             ->pluck('id')->toArray();
 
         Guardia::where('especialidad_id', $request->user()->especialidad_id)
@@ -532,7 +532,7 @@ class GuardiaController extends Controller
         $usuario = $request->user();
 
         $idsAdjuntos = User::where('especialidad_id', $usuario->especialidad_id)
-            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente']))
+            ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))
             ->pluck('id')->toArray();
 
         $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)

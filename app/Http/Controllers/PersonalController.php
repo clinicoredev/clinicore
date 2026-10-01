@@ -59,11 +59,11 @@ class PersonalController extends Controller
             return back()->withErrors(['limite' => 'Plan al límite de capacidad.']);
         }
 
-        // Ya NO validamos la contraseña
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Admin de Residentes', 'Facultativo', 'Residente'])],
+            // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
+            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
         ]);
 
         $nuevoMedico = User::create([
@@ -96,7 +96,8 @@ class PersonalController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)], 
-            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Admin de Residentes', 'Facultativo', 'Residente'])],
+            // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
+            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
         ]);
 
         $user->update([

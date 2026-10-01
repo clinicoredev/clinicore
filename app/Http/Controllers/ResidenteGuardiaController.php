@@ -6,7 +6,7 @@ use App\Exports\GuardiasExport;
 use App\Models\Ausencia;
 use App\Models\Guardia;
 use App\Models\LimitacionGuardia;
-use App\Models\Festivo; // <--- IMPORTANTE
+use App\Models\Festivo;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -50,8 +50,9 @@ class ResidenteGuardiaController extends Controller
         $mes = $request->query('mes', now()->month);
         $anio = $request->query('anio', now()->year);
 
+        // Solo Residentes y Residentes Mayores hacen guardias aquí
         $medicos = User::where('especialidad_id', $usuario->especialidad_id)
-            ->whereHas('roles', fn($query) => $query->whereIn('name', ['Residente', 'Admin de Residentes']))
+            ->whereHas('roles', fn($query) => $query->whereIn('name', ['Residente', 'Residente Mayor']))
             ->get();
 
         $idsResidentes = $medicos->pluck('id')->toArray();
@@ -111,7 +112,6 @@ class ResidenteGuardiaController extends Controller
                 'motivo' => $a->motivo ?: 'Ausencia justificada'
             ]);
 
-        // Carga de festivos para mostrarlos en el frontend
         $festivosDelMes = Festivo::where('especialidad_id', $usuario->especialidad_id)
             ->whereMonth('fecha', $mes)
             ->whereYear('fecha', $anio)
@@ -132,16 +132,22 @@ class ResidenteGuardiaController extends Controller
             ];
         })->sortByDesc('totales')->values();
 
+        // Cualquiera de los 3 roles puede gestionar el calendario de residentes
+        $tienePermisosGestion = $usuario->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor']);
+
         return inertia('Residentes/Guardias/Index', [
             'guardias' => $guardias, 'limitaciones' => $limitaciones, 'ausencias_mes' => $ausenciasMes,
-            'festivos' => $festivosDelMes, // Inyectamos los festivos visualmente
-            'medicos' => $medicos, 'equidad' => $equidad, 'permisos' => ['es_jefe' => $usuario->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])],
+            'festivos' => $festivosDelMes,
+            'medicos' => $medicos, 'equidad' => $equidad, 
+            'permisos' => ['es_jefe' => $tienePermisosGestion],
             'mes_actual' => (int)$mes, 'anio_actual' => (int)$anio,
         ]);
     }
 
     public function storeLimitacion(Request $request)
     {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id', 'tipo' => 'required|in:dia_semana,fecha_concreta,periodo',
             'valor' => 'nullable|string', 'fecha_inicio' => 'nullable|date', 'fecha_fin' => 'nullable|date|after_or_equal:fecha_inicio',
@@ -158,11 +164,17 @@ class ResidenteGuardiaController extends Controller
         return back();
     }
 
-    public function destroyLimitacion(LimitacionGuardia $limitacion) { $limitacion->delete(); return back(); }
+    public function destroyLimitacion(Request $request, LimitacionGuardia $limitacion) 
+    { 
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+        $limitacion->delete(); 
+        return back(); 
+    }
 
     public function guardarGuardiaManual(Request $request)
     {
-        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])) abort(403);
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+        
         $request->validate(['user_id' => 'required|exists:users,id', 'fecha' => 'required|date', 'tipo' => 'required|in:diaria_17h,festivo_24h']);
         if ($conflicto = $this->checkConflict($request->user_id, $request->fecha)) return back()->withErrors(['conflicto' => "Operación denegada: " . $conflicto]);
 
@@ -177,6 +189,8 @@ class ResidenteGuardiaController extends Controller
 
     public function permutar(Request $request)
     {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+
         $request->validate(['origen_id' => 'required|exists:guardias,id', 'destino_id' => 'required|exists:guardias,id']);
         $guardia1 = Guardia::find($request->origen_id); $guardia2 = Guardia::find($request->destino_id);
 
@@ -187,12 +201,12 @@ class ResidenteGuardiaController extends Controller
         $tempUserId = $guardia1->user_id; $guardia1->user_id = $guardia2->user_id; $guardia2->user_id = $tempUserId;
         $guardia1->is_manual = true; $guardia2->is_manual = true;
         $guardia1->save(); $guardia2->save();
-        return back()->with('success', 'Permuta realizada.');
+        return back()->with('success', 'Permuta realizada: Turnos intercambiados con éxito.');
     }
 
     public function generarAlgoritmo(Request $request)
     {
-        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])) abort(403);
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
 
         $request->validate([
             'mes' => 'required|integer|between:1,12', 'anio' => 'required|integer', 
@@ -212,8 +226,12 @@ class ResidenteGuardiaController extends Controller
         
         $diasDelMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
         
-        $medicos = User::where('especialidad_id', $jefe->especialidad_id)->whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))->get();
-        if ($medicos->count() < $personasPorDia) return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes residentes.']);
+        $medicos = User::where('especialidad_id', $jefe->especialidad_id)
+            ->whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Residente Mayor']))
+            ->when($request->has('medicos_incluidos'), fn($q) => $q->whereIn('id', $request->input('medicos_incluidos')))
+            ->get();
+
+        if ($medicos->count() < $personasPorDia) return back()->withErrors(['algoritmo' => 'Imposible generar cuadrante: No hay suficientes residentes en la plantilla.']);
 
         $idsResidentes = $medicos->pluck('id')->toArray();
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth(); $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
@@ -222,11 +240,9 @@ class ResidenteGuardiaController extends Controller
         $limitaciones = LimitacionGuardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsResidentes)->get();
         $guardiasManuales = Guardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsResidentes)->whereMonth('fecha', $mes)->whereYear('fecha', $anio)->where('is_manual', true)->get();
 
-        // 0. CARGA DE FESTIVOS DEL TENANT
         $festivosArr = Festivo::where('especialidad_id', $jefe->especialidad_id)->pluck('fecha')->map(fn($f) => Carbon::parse($f)->format('Y-m-d'))->toArray();
         $esFindeOFiesta = fn(Carbon $date) => $date->isWeekend() || in_array($date->format('Y-m-d'), $festivosArr);
 
-        // 1. CÁLCULO DE CUOTAS MATEMÁTICAS JUSTAS
         $totalSlotsFinde = 0;
         $totalSlotsDiaria = 0;
         for ($d = 1; $d <= $diasDelMes; $d++) {
@@ -359,7 +375,6 @@ class ResidenteGuardiaController extends Controller
         $getBestDoctorForBlock = function($fechasBloque, $limiteFindeFlexible) use ($medicos, $esElegible, &$stats, $limitesEquidadFinde, $usarMemoriaAnual, $esFindeOFiesta, $agrupacion, $guardiasAInsertar, $guardiasManuales, $getFindeId) {
             $candidatos = $medicos->filter(fn($m) => $esElegible($m->id, $fechasBloque));
             
-            // Topear a los médicos que ya han alcanzado la equidad en el mes, salvo fallo crítico
             $primeraF = reset($fechasBloque);
             if ($primeraF && $primeraF->dayOfWeekIso >= 5 && $limiteFindeFlexible !== 999) {
                 $candFiltrados = $candidatos->filter(fn($m) => $stats[$m->id]['turnos_vsd'] < $limiteFindeFlexible);
@@ -392,12 +407,11 @@ class ResidenteGuardiaController extends Controller
                         }
 
                         if ($boost || count($fechasBloque) > 1) {
-                            $score -= 5000000; // Imán de agrupación activo
+                            $score -= 5000000; 
                         } else {
-                            $score += 20000; // Penaliza dividir si es un finde distinto ya asignado
+                            $score += 20000; 
                         }
                     } else {
-                        // Penaliza arruinar más fines de semana de los necesarios
                         $ruined = count($stats[$m->id]['findes_distintos']);
                         $score += ($ruined * 50000); 
                     }
@@ -432,7 +446,6 @@ class ResidenteGuardiaController extends Controller
             }
         };
 
-        // FASE 1: ASIGNACIÓN DE BLOQUES DE FIN DE SEMANA
         if ($agrupacion !== 'ninguna') {
             $weekends = [];
             for ($d = 1; $d <= $diasDelMes; $d++) {
@@ -477,7 +490,6 @@ class ResidenteGuardiaController extends Controller
             }
         }
 
-        // FASE 2: RELLENO EQUITATIVO DE DÍAS RESTANTES (Y FESTIVOS SUELTOS)
         for ($dia = 1; $dia <= $diasDelMes; $dia++) {
             $fecha = Carbon::createFromDate($anio, $mes, $dia);
             
@@ -488,7 +500,7 @@ class ResidenteGuardiaController extends Controller
 
                 $limiteAplicar = ($fecha->dayOfWeekIso >= 5) ? $limiteVSDEquitativo : null;
                 $cand = $getBestDoctorForBlock([$fecha], $limiteAplicar);
-                if (!$cand) $cand = $getBestDoctorForBlock([$fecha], 999); // Fallback relax
+                if (!$cand) $cand = $getBestDoctorForBlock([$fecha], 999); 
 
                 if ($cand) {
                     $motivo = $esFindeOFiesta($fecha) ? 'IA (Festivo/Finde)' : 'IA';
@@ -512,22 +524,31 @@ class ResidenteGuardiaController extends Controller
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
         $jefe = $request->user();
 
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
+        if (!$jefe->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Residente Mayor']))->pluck('id')->toArray();
         Guardia::where('especialidad_id', $jefe->especialidad_id)->whereIn('user_id', $idsResidentes)->whereMonth('fecha', $request->mes)->whereYear('fecha', $request->anio)->delete();
         return back()->with('success', 'Calendario del mes limpiado correctamente.');
     }
 
     public function destroy(Request $request, Guardia $guardia)
     {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
         if ($guardia->especialidad_id !== $request->user()->especialidad_id) abort(403, 'Acceso denegado.');
-        $guardia->delete(); return back()->with('success', 'Turno liberado correctamente.');
+        
+        $guardia->delete(); 
+        return back()->with('success', 'Turno liberado correctamente.');
     }
 
     public function vaciarMes(Request $request)
     {
         $request->validate(['mes' => 'required|integer', 'anio' => 'required|integer']);
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
-        Guardia::where('especialidad_id', $request->user()->especialidad_id)->whereIn('user_id', $idsResidentes)->whereMonth('fecha', $request->mes)->whereYear('request->anio')->delete();
+        
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes', 'Residente Mayor'])) abort(403);
+
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Residente Mayor']))->pluck('id')->toArray();
+        Guardia::where('especialidad_id', $request->user()->especialidad_id)->whereIn('user_id', $idsResidentes)->whereMonth('fecha', $request->mes)->whereYear('fecha', $request->anio)->delete();
+        
         return back()->with('success', 'Calendario del mes reseteado por completo.');
     }
 
@@ -541,7 +562,7 @@ class ResidenteGuardiaController extends Controller
     {
         $mes = $request->query('mes', now()->month); $anio = $request->query('anio', now()->year);
         $usuario = $request->user();
-        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Admin de Residentes']))->pluck('id')->toArray();
+        $idsResidentes = User::whereHas('roles', fn($q) => $q->whereIn('name', ['Residente', 'Residente Mayor']))->pluck('id')->toArray();
         $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)->whereIn('user_id', $idsResidentes)->with('facultativo')->whereMonth('fecha', $mes)->whereYear('fecha', $anio)->orderBy('fecha')->get();
 
         $pdf = Pdf::loadView('reportes.guardias_pdf', [

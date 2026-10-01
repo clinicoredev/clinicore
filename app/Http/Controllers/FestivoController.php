@@ -31,14 +31,14 @@ class FestivoController extends Controller
         return Inertia::render('Festivos/Index', [
             'festivosAgrupados' => $festivosAgrupados,
             'permisos' => [
-                'es_admin' => $usuario->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])
+                'es_admin' => $usuario->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes'])
             ]
         ]);
     }
 
     public function store(Request $request)
     {
-        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes'])) {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes'])) {
             abort(403, 'No tienes permisos para gestionar festivos.');
         }
 
@@ -68,7 +68,7 @@ class FestivoController extends Controller
 
     public function destroy(Request $request, Festivo $festivo)
     {
-        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Admin de Residentes']) || $festivo->especialidad_id !== $request->user()->especialidad_id) {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes']) || $festivo->especialidad_id !== $request->user()->especialidad_id) {
             abort(403, 'Acceso denegado.');
         }
 
