@@ -56,16 +56,15 @@ class DashboardController extends Controller
         // ==========================================
         $queryPendientes = Ausencia::where('especialidad_id', $especialidadId)->where('estado', 'pendiente');
         if (!$esJefe) {
-            $queryPendientes->where('user_id', $user->id); // El facultativo solo cuenta sus propias peticiones pendientes
+            $queryPendientes->where('user_id', $user->id); 
         }
         $totalPendientes = $queryPendientes->count();
 
-        // La tabla de la derecha del Dashboard:
         $colaPeticiones = Ausencia::where('especialidad_id', $especialidadId);
         if ($esJefe) {
-            $colaPeticiones->where('estado', 'pendiente'); // Al Jefe le mostramos lo que tiene que firmar
+            $colaPeticiones->where('estado', 'pendiente'); 
         } else {
-            $colaPeticiones->where('user_id', $user->id); // Al facultativo le mostramos un histórico reciente de lo suyo
+            $colaPeticiones->where('user_id', $user->id); 
         }
 
         $colaPeticiones = $colaPeticiones->with('solicitante:id,name')
@@ -89,84 +88,40 @@ class DashboardController extends Controller
             ->first();
 
         // ==========================================
-        // 5. CÁLCULO DE FATIGA ACUMULADA PARA LA GRÁFICA
+        // 5. CONSULTA SQL AVANZADA DE DESGLOSE ANUAL (YTD)
         // ==========================================
-        $guardiasAnio = Guardia::where('especialidad_id', $especialidadId)
-            ->whereYear('fecha', $hoy->year)
-            ->get();
+        // Primero sacamos los IDs de los médicos válidos del servicio (evitando superadmins)
+        $validUserIds = User::where('especialidad_id', $especialidadId)
+            ->whereDoesntHave('roles', fn($q) => $q->where('name', 'SuperAdmin'))
+            ->pluck('id');
 
-        $mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-        $puntosMiosPorMes = array_fill(0, 12, 0);
-        $puntosTotalesPorMes = array_fill(0, 12, 0);
-
-        foreach ($guardiasAnio as $g) {
-            $mesIndice = Carbon::parse($g->fecha)->month - 1;
-            $puntos = $g->tipo === 'festivo_24h' ? 2 : 1;
-            
-            $puntosTotalesPorMes[$mesIndice] += $puntos;
-            
-            if ($g->user_id === $user->id) {
-                $puntosMiosPorMes[$mesIndice] += $puntos;
-            }
-        }
-
-        $acumuladoMio = [];
-        $acumuladoMedia = [];
-        $sumaMia = 0;
-        $sumaMedia = 0;
-
-        foreach ($mesesNombres as $i => $mes) {
-            if ($i > $hoy->month) {
-                $acumuladoMio[] = null;
-                $acumuladoMedia[] = null;
-            } else {
-                $sumaMia += $puntosMiosPorMes[$i];
-                $sumaMedia += ($puntosTotalesPorMes[$i] / max(1, $totalMedicos)); 
-                
-                $acumuladoMio[] = $sumaMia;
-                $acumuladoMedia[] = round($sumaMedia, 1);
-            }
-        }
-
-        $graficaData = [
-            'categorias' => $mesesNombres,
-            'mis_puntos' => $acumuladoMio,
-            'media_puntos' => $acumuladoMedia
-        ];
-
-        // ==========================================
-        // 6. CONSULTA SQL AVANZADA DE DESGLOSE ANUAL (YTD)
-        // ==========================================
-        // Ejecutamos tu consulta usando el Query Builder de Laravel de forma segura.
-        // Limitamos al año actual y solo al usuario conectado para mostrar SUS estadísticas.
-        $desgloseAnual = DB::table('users as u')
+        $queryDesglose = DB::table('users as u')
             ->leftJoin('guardias as g', function($join) use ($hoy) {
                 $join->on('u.id', '=', 'g.user_id')
-                     ->whereYear('g.fecha', $hoy->year); // Solo contamos las de este año
+                     ->whereYear('g.fecha', $hoy->year); // Solo contamos guardias de este año
             })
             ->leftJoin('festivos as f', function($join) {
                 $join->on('g.fecha', '=', 'f.fecha')
                      ->on('g.especialidad_id', '=', 'f.especialidad_id');
             })
-            ->where('u.id', $user->id)
-            ->selectRaw("
+            ->whereIn('u.id', $validUserIds);
+
+        // Si no es jefe, solo queremos ver su fila
+        if (!$esJefe) {
+            $queryDesglose->where('u.id', $user->id);
+        }
+
+        $desgloseAnual = $queryDesglose->selectRaw("
+                u.id,
+                u.name as nombre,
                 SUM(CASE WHEN g.tipo = 'diaria_17h' THEN 1 ELSE 0 END) AS guardias_17h,
                 SUM(CASE WHEN g.tipo = 'festivo_24h' AND f.id IS NULL THEN 1 ELSE 0 END) AS guardias_24h_finde,
                 SUM(CASE WHEN g.tipo = 'festivo_24h' AND f.id IS NOT NULL THEN 1 ELSE 0 END) AS guardias_24h_festivo,
                 COUNT(g.id) AS total_guardias
             ")
-            ->groupBy('u.id')
-            ->first();
-
-        // Si por algún motivo no devuelve nada (ej: base de datos vacía), forzamos ceros.
-        if (!$desgloseAnual) {
-            $desgloseAnual = (object)[
-                'guardias_17h' => 0,
-                'guardias_24h_finde' => 0,
-                'guardias_24h_festivo' => 0,
-                'total_guardias' => 0
-            ];
-        }
+            ->groupBy('u.id', 'u.name')
+            ->orderBy('total_guardias', 'desc')
+            ->get();
 
         return Inertia::render('Dashboard', [
             'kpis' => [
@@ -176,7 +131,7 @@ class DashboardController extends Controller
                 'mis_guardias_mes' => $misGuardiasMes,
                 'ausencias_pendientes' => $totalPendientes,
             ],
-            'desglose_anual' => $desgloseAnual, // NUEVA VARIABLE
+            'desglose_anual' => $desgloseAnual, 
             'guardia_hoy' => $guardiaHoy ? [
                 'medico' => str_replace(['Dr. ', 'Dra. '], '', $guardiaHoy->facultativo->name),
                 'tipo' => $guardiaHoy->tipo === 'festivo_24h' ? '24h (Fin de semana)' : '17h (Diaria)',
@@ -191,7 +146,6 @@ class DashboardController extends Controller
             'cola_firmas' => $colaPeticiones,
             'token_calendario' => $user->calendar_token,
             'permisos' => ['es_jefe' => $esJefe],
-            'grafica_fatiga' => $graficaData
         ]);
     }
 

@@ -5,43 +5,16 @@ import {
     Stethoscope, CheckCircle2, XCircle, AlertCircle, 
     ArrowRight, ShieldCheck, Zap, CalendarClock, PartyPopper, Moon
 } from '@lucide/vue';
-import VueApexCharts from "vue3-apexcharts";
 
 const props = defineProps({
     kpis: Object,
-    desglose_anual: Object, // Traemos el desglose de la consulta SQL
+    desglose_anual: Array, // Ahora es un Array con los resultados de la DB
     guardia_hoy: Object,
     mi_proxima_guardia: Object,
     cola_firmas: Array,
     token_calendario: String,
     permisos: Object,
-    grafica_fatiga: Object,
 });
-
-// Configuración de la gráfica
-const chartSeries = [
-    { name: 'Mi Carga (Puntos)', data: props.grafica_fatiga.mis_puntos },
-    { name: 'Media Departamento', data: props.grafica_fatiga.media_puntos }
-];
-
-const chartOptions = {
-    chart: { type: 'area', height: 300, toolbar: { show: false }, background: 'transparent', zoom: { enabled: false } },
-    colors: ['#10b981', '#6366f1'], 
-    fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
-    dataLabels: { enabled: false },
-    stroke: { curve: 'smooth', width: 3 },
-    xaxis: { 
-        categories: props.grafica_fatiga.categorias,
-        labels: { style: { colors: '#71717a' } }, 
-        axisBorder: { show: false },
-        axisTicks: { show: false }
-    },
-    yaxis: { labels: { style: { colors: '#71717a' } } },
-    grid: { borderColor: '#27272a', strokeDashArray: 4, yaxis: { lines: { show: true } } },
-    theme: { mode: 'dark' },
-    legend: { position: 'top', horizontalAlign: 'right', labels: { colors: '#a1a1aa' } },
-    tooltip: { theme: 'dark', y: { formatter: (val) => val + " ptos" } }
-};
 
 const page = usePage();
 const nombreUsuario = page.props.auth.user.name;
@@ -326,25 +299,51 @@ const copiarEnlaceCalendario = () => {
             </div>
         </div>
 
-        <!-- MÓDULO ESTADÍSTICAS YTD: MAPA DE FATIGA + TARJETAS DE DESGLOSE -->
+        <!-- MÓDULO ESTADÍSTICAS YTD -->
         <div class="mt-8 p-6 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl space-y-6">
             
-            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div class="flex items-center justify-between">
                 <div>
                     <h3 class="text-lg font-bold text-white flex items-center gap-2">
                         <Activity class="w-5 h-5 text-emerald-400" />
-                        Mapa de Fatiga Acumulada YTD
+                        {{ permisos.es_jefe ? 'Balance Global del Servicio (YTD)' : 'Mi Balance Anual (YTD)' }}
                     </h3>
-                    <p class="text-xs text-zinc-400 mt-0.5">Analítica de rendimiento y carga asistencial anual.</p>
+                    <p class="text-xs text-zinc-400 mt-0.5">
+                        {{ permisos.es_jefe ? 'Resumen de carga asistencial acumulada de toda la plantilla en el año actual.' : 'Resumen estadístico de tus guardias realizadas durante este año.' }}
+                    </p>
                 </div>
             </div>
 
-            <!-- TARJETAS DE DESGLOSE SQL -->
-            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <!-- VISTA DE JEFE: TABLA DE TODOS LOS MÉDICOS -->
+            <div v-if="permisos.es_jefe" class="overflow-x-auto rounded-xl border border-zinc-800">
+                <table class="w-full text-left border-collapse min-w-[600px]">
+                    <thead>
+                        <tr class="bg-zinc-950/50 text-zinc-400 text-[10px] uppercase font-bold tracking-wider border-b border-zinc-800">
+                            <th class="py-3 px-4">Facultativo</th>
+                            <th class="py-3 px-4 text-center">Diarias (17h)</th>
+                            <th class="py-3 px-4 text-center">Fines de Sem. (24h)</th>
+                            <th class="py-3 px-4 text-center">Festivos (24h)</th>
+                            <th class="py-3 px-4 text-center text-emerald-400">Total Guardias</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-800/60 text-sm">
+                        <tr v-for="stats in desglose_anual" :key="stats.id" class="hover:bg-zinc-800/30 transition-colors">
+                            <td class="py-3 px-4 font-semibold text-white">{{ stats.nombre.replace('Dr. ', '').replace('Dra. ', '') }}</td>
+                            <td class="py-3 px-4 text-center font-mono text-zinc-300">{{ stats.guardias_17h }}</td>
+                            <td class="py-3 px-4 text-center font-mono text-amber-400">{{ stats.guardias_24h_finde }}</td>
+                            <td class="py-3 px-4 text-center font-mono text-rose-400">{{ stats.guardias_24h_festivo }}</td>
+                            <td class="py-3 px-4 text-center font-mono font-bold text-emerald-400 bg-emerald-500/5">{{ stats.total_guardias }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- VISTA DE FACULTATIVO NORMAL: TARJETAS (Desglose individual) -->
+            <div v-else class="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
                     <div>
                         <span class="block text-[10px] uppercase font-bold text-zinc-500">Guardias Totales</span>
-                        <span class="block text-2xl font-black font-mono text-white mt-1">{{ desglose_anual.total_guardias }}</span>
+                        <span class="block text-2xl font-black font-mono text-white mt-1">{{ desglose_anual[0]?.total_guardias || 0 }}</span>
                     </div>
                     <div class="p-2 bg-emerald-500/10 rounded-lg"><CalendarDays class="w-5 h-5 text-emerald-400" /></div>
                 </div>
@@ -352,7 +351,7 @@ const copiarEnlaceCalendario = () => {
                 <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
                     <div>
                         <span class="block text-[10px] uppercase font-bold text-zinc-500">Turnos Ordinarios (17h)</span>
-                        <span class="block text-2xl font-black font-mono text-zinc-300 mt-1">{{ desglose_anual.guardias_17h }}</span>
+                        <span class="block text-2xl font-black font-mono text-zinc-300 mt-1">{{ desglose_anual[0]?.guardias_17h || 0 }}</span>
                     </div>
                     <div class="p-2 bg-zinc-800 rounded-lg"><Moon class="w-5 h-5 text-zinc-400" /></div>
                 </div>
@@ -360,7 +359,7 @@ const copiarEnlaceCalendario = () => {
                 <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
                     <div>
                         <span class="block text-[10px] uppercase font-bold text-zinc-500">Fines de Semana (24h)</span>
-                        <span class="block text-2xl font-black font-mono text-amber-400 mt-1">{{ desglose_anual.guardias_24h_finde }}</span>
+                        <span class="block text-2xl font-black font-mono text-amber-400 mt-1">{{ desglose_anual[0]?.guardias_24h_finde || 0 }}</span>
                     </div>
                     <div class="p-2 bg-amber-500/10 rounded-lg"><CalendarClock class="w-5 h-5 text-amber-400" /></div>
                 </div>
@@ -368,21 +367,12 @@ const copiarEnlaceCalendario = () => {
                 <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
                     <div>
                         <span class="block text-[10px] uppercase font-bold text-zinc-500">Festivos (24h)</span>
-                        <span class="block text-2xl font-black font-mono text-rose-400 mt-1">{{ desglose_anual.guardias_24h_festivo }}</span>
+                        <span class="block text-2xl font-black font-mono text-rose-400 mt-1">{{ desglose_anual[0]?.guardias_24h_festivo || 0 }}</span>
                     </div>
                     <div class="p-2 bg-rose-500/10 rounded-lg"><PartyPopper class="w-5 h-5 text-rose-400" /></div>
                 </div>
             </div>
-            
-            <!-- GRÁFICO DE LÍNEAS -->
-            <div class="w-full h-[300px]">
-                <VueApexCharts 
-                    type="area" 
-                    height="300" 
-                    :options="chartOptions" 
-                    :series="chartSeries" 
-                />
-            </div>
+
         </div>
 
     </div>
