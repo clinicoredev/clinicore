@@ -531,10 +531,14 @@ class GuardiaController extends Controller
         $anio = $request->query('anio', now()->year);
         $usuario = $request->user();
 
-        $idsAdjuntos = User::where('especialidad_id', $usuario->especialidad_id)
+        // 1. Obtener médicos de la plantilla
+        $medicos = User::where('especialidad_id', $usuario->especialidad_id)
             ->whereDoesntHave('roles', fn($q) => $q->whereIn('name', ['SuperAdmin', 'Residente', 'Residente Mayor']))
-            ->pluck('id')->toArray();
+            ->get();
 
+        $idsAdjuntos = $medicos->pluck('id')->toArray();
+
+        // 2. Obtener las guardias del mes
         $guardias = Guardia::where('especialidad_id', $usuario->especialidad_id)
             ->whereIn('user_id', $idsAdjuntos)
             ->with('facultativo')
@@ -543,8 +547,50 @@ class GuardiaController extends Controller
             ->orderBy('fecha')
             ->get();
 
+        // 3. Calcular métricas de Equidad
+        $equidad = $medicos->map(function ($medico) use ($guardias) {
+            $misGuardias = $guardias->where('user_id', $medico->id);
+            return [
+                'nombre' => str_replace(['Dr. ', 'Dra. '], '', $medico->name),
+                'totales' => $misGuardias->count(),
+                'findes' => $misGuardias->where('tipo', 'festivo_24h')->count(),
+            ];
+        })->sortByDesc('totales')->values();
+
+        // 4. Construir la matriz del Calendario visual
+        $diasEnMes = Carbon::createFromDate($anio, $mes, 1)->daysInMonth;
+        
+        $guardiasPorDia = [];
+        foreach ($guardias as $g) {
+            $dia = Carbon::parse($g->fecha)->day;
+            $guardiasPorDia[$dia][] = $g;
+        }
+
+        $calendario = [];
+        $semana = array_fill(0, 7, null);
+        
+        for ($d = 1; $d <= $diasEnMes; $d++) {
+            $fechaObj = Carbon::createFromDate($anio, $mes, $d);
+            $diaIso = $fechaObj->dayOfWeekIso - 1; // 0 = Lunes
+            
+            $semana[$diaIso] = [
+                'numero' => $d,
+                'es_finde' => in_array($diaIso, [5, 6]), // Sábado y Domingo visualmente
+                'guardias' => $guardiasPorDia[$d] ?? []
+            ];
+            
+            // Si es Domingo o el último día del mes, guardamos la semana
+            if ($diaIso == 6 || $d == $diasEnMes) {
+                $calendario[] = $semana;
+                $semana = array_fill(0, 7, null);
+            }
+        }
+
+        // 5. Inyectar todo a la vista y renderizar el PDF
         $pdf = Pdf::loadView('reportes.guardias_pdf', [
             'guardias' => $guardias,
+            'equidad' => $equidad,
+            'calendario' => $calendario,
             'mes' => $mes,
             'anio' => $anio,
             'hospital' => $usuario->especialidad->hospital->nombre ?? 'Hospital',
