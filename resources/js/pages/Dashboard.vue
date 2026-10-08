@@ -3,12 +3,13 @@ import { Head, router, usePage } from '@inertiajs/vue3';
 import { 
     Activity, Users, CalendarDays, Clock, 
     Stethoscope, CheckCircle2, XCircle, AlertCircle, 
-    ArrowRight, ShieldCheck, Zap, CalendarClock, UserCheck 
+    ArrowRight, ShieldCheck, Zap, CalendarClock, PartyPopper, Moon
 } from '@lucide/vue';
 import VueApexCharts from "vue3-apexcharts";
 
 const props = defineProps({
     kpis: Object,
+    desglose_anual: Object, // Traemos el desglose de la consulta SQL
     guardia_hoy: Object,
     mi_proxima_guardia: Object,
     cola_firmas: Array,
@@ -25,13 +26,13 @@ const chartSeries = [
 
 const chartOptions = {
     chart: { type: 'area', height: 300, toolbar: { show: false }, background: 'transparent', zoom: { enabled: false } },
-    colors: ['#10b981', '#6366f1'], // Verde Emerald (Mío) y Azul Indigo (Media)
+    colors: ['#10b981', '#6366f1'], 
     fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
     dataLabels: { enabled: false },
     stroke: { curve: 'smooth', width: 3 },
     xaxis: { 
         categories: props.grafica_fatiga.categorias,
-        labels: { style: { colors: '#71717a' } }, // Zinc 500
+        labels: { style: { colors: '#71717a' } }, 
         axisBorder: { show: false },
         axisTicks: { show: false }
     },
@@ -48,25 +49,20 @@ const nombreUsuario = page.props.auth.user.name;
 const firmarDesdePortada = (id, nuevoEstado) => {
     router.patch(`/ausencias/${id}/resolver`, { estado: nuevoEstado }, { preserveScroll: true });
 };
-// Función robusta para copiar enlaces en cualquier entorno (HTTP y HTTPS)
+
 const copiarEnlaceCalendario = () => {
     const url = `${window.location.origin}/feed/calendario/${props.token_calendario}.ics`;
 
-    // Si estamos en HTTPS y la API moderna está disponible
     if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(url).then(() => {
             alert('¡Enlace secreto copiado! Pégalo en Añadir Suscripción en tu app de calendario.');
         });
     } else {
-        // Plan B: Fallback "clásico" para entornos locales HTTP (clinicore.test)
         const textArea = document.createElement("textarea");
         textArea.value = url;
-        
-        // Lo escondemos visualmente
         textArea.style.position = "fixed";
         textArea.style.left = "-999999px";
         document.body.appendChild(textArea);
-        
         textArea.focus();
         textArea.select();
         
@@ -92,7 +88,7 @@ const copiarEnlaceCalendario = () => {
             <div>
                 <div class="flex items-center gap-2 text-xs font-mono text-emerald-400 mb-1 uppercase tracking-wider font-bold">
                     <Zap class="w-3.5 h-3.5 fill-emerald-400" />
-                    {{ $page.props.auth.user.hospital }} — {{ $page.props.auth.user.especialidad }}
+                    {{ $page.props.auth.user.hospital }} — {{$page.props.auth.user.especialidad }}
                 </div>
                 <h1 class="text-2xl font-black text-white tracking-tight">
                     Buenos días, <span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-200">{{ nombreUsuario }}</span>
@@ -107,10 +103,9 @@ const copiarEnlaceCalendario = () => {
             </div>
         </div>
 
-        <!-- KPIs DINÁMICOS (Cambian según el rol) -->
+        <!-- KPIs DINÁMICOS -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             
-            <!-- TARJETA 1 -->
             <div class="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl relative overflow-hidden group transition-all">
                 <div class="flex justify-between items-start">
                     <span class="text-xs font-bold uppercase tracking-wider text-zinc-400">
@@ -130,7 +125,6 @@ const copiarEnlaceCalendario = () => {
                 </div>
             </div>
 
-            <!-- TARJETA 2 -->
             <div class="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl relative overflow-hidden group transition-all">
                 <div class="flex justify-between items-start">
                     <span class="text-xs font-bold uppercase tracking-wider text-zinc-400">
@@ -152,7 +146,6 @@ const copiarEnlaceCalendario = () => {
                 </p>
             </div>
 
-            <!-- TARJETA 3 -->
             <div class="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl relative overflow-hidden group transition-all" :class="kpis.ausencias_pendientes > 0 ? 'border-amber-500/30' : ''">
                 <div class="flex justify-between items-start">
                     <span class="text-xs font-bold uppercase tracking-wider" :class="kpis.ausencias_pendientes > 0 ? 'text-amber-400' : 'text-zinc-400'">
@@ -170,8 +163,7 @@ const copiarEnlaceCalendario = () => {
                 </div>
             </div>
 
-            <!-- TARJETA 4 (Solo para Facultativos: Su próxima guardia) -->
-            <div v-if="!permisos.es_jefe && mi_proxima_guardia" class="p-5 bg-linear-to-br from-indigo-950 to-zinc-900 border border-indigo-500/30 rounded-2xl relative overflow-hidden transition-all shadow-lg shadow-indigo-500/10">
+            <div v-if="!permisos.es_jefe && mi_proxima_guardia" class="p-5 bg-gradient-to-br from-indigo-950 to-zinc-900 border border-indigo-500/30 rounded-2xl relative overflow-hidden transition-all shadow-lg shadow-indigo-500/10">
                 <div class="flex justify-between items-start">
                     <span class="text-xs font-bold uppercase tracking-wider text-indigo-300">Próximo Turno</span>
                     <div class="p-2 rounded-xl bg-indigo-500/20 text-indigo-400"><CalendarClock class="w-4 h-4" /></div>
@@ -192,7 +184,6 @@ const copiarEnlaceCalendario = () => {
                 <div class="mt-4 text-xs text-zinc-500">Sin guardias asignadas próximamente.</div>
             </div>
 
-            <!-- Si es Jefe, pintamos un KPI extra genérico para cuadrar la estructura -->
             <div v-if="permisos.es_jefe" class="p-5 bg-zinc-900/90 border border-zinc-800 rounded-2xl relative overflow-hidden transition-all">
                 <div class="flex justify-between items-start">
                     <span class="text-xs font-bold uppercase tracking-wider text-zinc-400">Incidencias Hoy</span>
@@ -221,7 +212,7 @@ const copiarEnlaceCalendario = () => {
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             <!-- PANEL CENTRAL -->
-            <div class="lg:col-span-2 bg-linear-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
+            <div class="lg:col-span-2 bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
                 
                 <div class="flex items-center justify-between border-b border-zinc-800/80 pb-4">
                     <div class="flex items-center gap-2">
@@ -260,20 +251,18 @@ const copiarEnlaceCalendario = () => {
                     <p class="text-xs text-zinc-600 mt-1">No hay turnos de guardia 17h/24h registrados para hoy.</p>
                 </div>
 
-                <!-- BOTONES DE ACCIÓN RÁPIDA (Diferenciados por rol) -->
+                <!-- BOTONES DE ACCIÓN RÁPIDA -->
                 <div class="grid grid-cols-2 gap-3 pt-4 border-t border-zinc-800/80">
                     <button @click="router.get('/calendario-completo')" class="p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 flex items-center justify-between text-xs text-zinc-300 font-medium transition-all cursor-pointer group">
                         Ver Calendario General
                         <ArrowRight class="w-4 h-4 text-zinc-500 group-hover:translate-x-1 group-hover:text-emerald-400 transition-all" />
                     </button>
 
-                    <!-- Botón exclusivo Jefes -->
                     <button v-if="permisos.es_jefe" @click="router.get('/guardias')" class="p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 flex items-center justify-between text-xs text-zinc-300 font-medium transition-all cursor-pointer group">
                         Gestionar Cuadrante IA
                         <ArrowRight class="w-4 h-4 text-zinc-500 group-hover:translate-x-1 group-hover:text-emerald-400 transition-all" />
                     </button>
                     
-                    <!-- Botón exclusivo Facultativos -->
                     <button v-else @click="router.get('/ausencias')" class="p-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 flex items-center justify-between text-xs text-zinc-300 font-medium transition-all cursor-pointer group">
                         Solicitar Día Libre / Permiso
                         <ArrowRight class="w-4 h-4 text-zinc-500 group-hover:translate-x-1 group-hover:text-emerald-400 transition-all" />
@@ -298,12 +287,7 @@ const copiarEnlaceCalendario = () => {
                     </div>
 
                     <div v-else class="space-y-3">
-                        <div 
-                            v-for="item in cola_firmas" 
-                            :key="item.id"
-                            class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 flex flex-col gap-2.5 relative overflow-hidden"
-                        >
-                            <!-- Línea de color según estado para facultativos -->
+                        <div v-for="item in cola_firmas" :key="item.id" class="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 flex flex-col gap-2.5 relative overflow-hidden">
                             <div v-if="!permisos.es_jefe && item.estado === 'aprobada'" class="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500"></div>
                             <div v-if="!permisos.es_jefe && item.estado === 'denegada'" class="absolute left-0 top-0 bottom-0 w-1 bg-rose-500"></div>
                             <div v-if="!permisos.es_jefe && item.estado === 'pendiente'" class="absolute left-0 top-0 bottom-0 w-1 bg-amber-500"></div>
@@ -315,7 +299,6 @@ const copiarEnlaceCalendario = () => {
                                     <span class="text-[10px] font-mono text-zinc-500">{{ item.fechas }}</span>
                                 </div>
 
-                                <!-- Botones si eres jefe -->
                                 <div v-if="permisos.es_jefe" class="flex gap-1.5 shrink-0">
                                     <button @click="firmarDesdePortada(item.id, 'aprobada')" title="Autorizar" class="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-zinc-950 rounded-lg border border-emerald-500/30 transition-all cursor-pointer">
                                         <CheckCircle2 class="w-4 h-4" />
@@ -325,7 +308,6 @@ const copiarEnlaceCalendario = () => {
                                     </button>
                                 </div>
                                 
-                                <!-- Etiquetas de estado si eres facultativo -->
                                 <div v-else>
                                     <span v-if="item.estado === 'pendiente'" class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 uppercase">En revisión</span>
                                     <span v-if="item.estado === 'aprobada'" class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase">Aprobado</span>
@@ -342,19 +324,57 @@ const copiarEnlaceCalendario = () => {
                     </button>
                 </div>
             </div>
+        </div>
 
-            <!-- AÑADE ESTO JUSTO DESPUÉS DEL BLOQUE DE TUS TARJETAS KPI -->
-        <div class="mt-8 p-6 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl">
-            <div class="flex items-center justify-between mb-4">
+        <!-- MÓDULO ESTADÍSTICAS YTD: MAPA DE FATIGA + TARJETAS DE DESGLOSE -->
+        <div class="mt-8 p-6 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-xl space-y-6">
+            
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                     <h3 class="text-lg font-bold text-white flex items-center gap-2">
                         <Activity class="w-5 h-5 text-emerald-400" />
-                        Mapa de Fatiga Acumulada
+                        Mapa de Fatiga Acumulada YTD
                     </h3>
-                    <p class="text-xs text-zinc-400 mt-0.5">Comparativa YTD de tus puntos de esfuerzo (Diaria=1, Finde=2) contra la media del servicio.</p>
+                    <p class="text-xs text-zinc-400 mt-0.5">Analítica de rendimiento y carga asistencial anual.</p>
+                </div>
+            </div>
+
+            <!-- TARJETAS DE DESGLOSE SQL -->
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
+                    <div>
+                        <span class="block text-[10px] uppercase font-bold text-zinc-500">Guardias Totales</span>
+                        <span class="block text-2xl font-black font-mono text-white mt-1">{{ desglose_anual.total_guardias }}</span>
+                    </div>
+                    <div class="p-2 bg-emerald-500/10 rounded-lg"><CalendarDays class="w-5 h-5 text-emerald-400" /></div>
+                </div>
+
+                <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
+                    <div>
+                        <span class="block text-[10px] uppercase font-bold text-zinc-500">Turnos Ordinarios (17h)</span>
+                        <span class="block text-2xl font-black font-mono text-zinc-300 mt-1">{{ desglose_anual.guardias_17h }}</span>
+                    </div>
+                    <div class="p-2 bg-zinc-800 rounded-lg"><Moon class="w-5 h-5 text-zinc-400" /></div>
+                </div>
+
+                <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
+                    <div>
+                        <span class="block text-[10px] uppercase font-bold text-zinc-500">Fines de Semana (24h)</span>
+                        <span class="block text-2xl font-black font-mono text-amber-400 mt-1">{{ desglose_anual.guardias_24h_finde }}</span>
+                    </div>
+                    <div class="p-2 bg-amber-500/10 rounded-lg"><CalendarClock class="w-5 h-5 text-amber-400" /></div>
+                </div>
+
+                <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
+                    <div>
+                        <span class="block text-[10px] uppercase font-bold text-zinc-500">Festivos (24h)</span>
+                        <span class="block text-2xl font-black font-mono text-rose-400 mt-1">{{ desglose_anual.guardias_24h_festivo }}</span>
+                    </div>
+                    <div class="p-2 bg-rose-500/10 rounded-lg"><PartyPopper class="w-5 h-5 text-rose-400" /></div>
                 </div>
             </div>
             
+            <!-- GRÁFICO DE LÍNEAS -->
             <div class="w-full h-[300px]">
                 <VueApexCharts 
                     type="area" 
@@ -363,8 +383,6 @@ const copiarEnlaceCalendario = () => {
                     :series="chartSeries" 
                 />
             </div>
-        </div>
-
         </div>
 
     </div>

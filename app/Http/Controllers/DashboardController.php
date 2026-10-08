@@ -7,6 +7,7 @@ use App\Models\Guardia;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
@@ -88,20 +89,18 @@ class DashboardController extends Controller
             ->first();
 
         // ==========================================
-        // 5. CÁLCULO DE FATIGA ACUMULADA (YTD) PARA LA GRÁFICA
+        // 5. CÁLCULO DE FATIGA ACUMULADA PARA LA GRÁFICA
         // ==========================================
         $guardiasAnio = Guardia::where('especialidad_id', $especialidadId)
             ->whereYear('fecha', $hoy->year)
             ->get();
 
         $mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-        
         $puntosMiosPorMes = array_fill(0, 12, 0);
         $puntosTotalesPorMes = array_fill(0, 12, 0);
 
-        // Agrupamos las guardias por mes y calculamos el "esfuerzo"
         foreach ($guardiasAnio as $g) {
-            $mesIndice = Carbon::parse($g->fecha)->month - 1; // 0 = Enero, 11 = Diciembre
+            $mesIndice = Carbon::parse($g->fecha)->month - 1;
             $puntos = $g->tipo === 'festivo_24h' ? 2 : 1;
             
             $puntosTotalesPorMes[$mesIndice] += $puntos;
@@ -111,20 +110,17 @@ class DashboardController extends Controller
             }
         }
 
-        // Convertimos a valores acumulados para que la línea siempre suba (Fatiga YTD)
         $acumuladoMio = [];
         $acumuladoMedia = [];
         $sumaMia = 0;
         $sumaMedia = 0;
 
         foreach ($mesesNombres as $i => $mes) {
-            // Solo calculamos hasta el mes actual + 1 para que la gráfica no caiga a cero en el futuro
             if ($i > $hoy->month) {
                 $acumuladoMio[] = null;
                 $acumuladoMedia[] = null;
             } else {
                 $sumaMia += $puntosMiosPorMes[$i];
-                // La media es el total del departamento entre el número de médicos
                 $sumaMedia += ($puntosTotalesPorMes[$i] / max(1, $totalMedicos)); 
                 
                 $acumuladoMio[] = $sumaMia;
@@ -138,6 +134,40 @@ class DashboardController extends Controller
             'media_puntos' => $acumuladoMedia
         ];
 
+        // ==========================================
+        // 6. CONSULTA SQL AVANZADA DE DESGLOSE ANUAL (YTD)
+        // ==========================================
+        // Ejecutamos tu consulta usando el Query Builder de Laravel de forma segura.
+        // Limitamos al año actual y solo al usuario conectado para mostrar SUS estadísticas.
+        $desgloseAnual = DB::table('users as u')
+            ->leftJoin('guardias as g', function($join) use ($hoy) {
+                $join->on('u.id', '=', 'g.user_id')
+                     ->whereYear('g.fecha', $hoy->year); // Solo contamos las de este año
+            })
+            ->leftJoin('festivos as f', function($join) {
+                $join->on('g.fecha', '=', 'f.fecha')
+                     ->on('g.especialidad_id', '=', 'f.especialidad_id');
+            })
+            ->where('u.id', $user->id)
+            ->selectRaw("
+                SUM(CASE WHEN g.tipo = 'diaria_17h' THEN 1 ELSE 0 END) AS guardias_17h,
+                SUM(CASE WHEN g.tipo = 'festivo_24h' AND f.id IS NULL THEN 1 ELSE 0 END) AS guardias_24h_finde,
+                SUM(CASE WHEN g.tipo = 'festivo_24h' AND f.id IS NOT NULL THEN 1 ELSE 0 END) AS guardias_24h_festivo,
+                COUNT(g.id) AS total_guardias
+            ")
+            ->groupBy('u.id')
+            ->first();
+
+        // Si por algún motivo no devuelve nada (ej: base de datos vacía), forzamos ceros.
+        if (!$desgloseAnual) {
+            $desgloseAnual = (object)[
+                'guardias_17h' => 0,
+                'guardias_24h_finde' => 0,
+                'guardias_24h_festivo' => 0,
+                'total_guardias' => 0
+            ];
+        }
+
         return Inertia::render('Dashboard', [
             'kpis' => [
                 'total_medicos' => $totalMedicos,
@@ -146,6 +176,7 @@ class DashboardController extends Controller
                 'mis_guardias_mes' => $misGuardiasMes,
                 'ausencias_pendientes' => $totalPendientes,
             ],
+            'desglose_anual' => $desgloseAnual, // NUEVA VARIABLE
             'guardia_hoy' => $guardiaHoy ? [
                 'medico' => str_replace(['Dr. ', 'Dra. '], '', $guardiaHoy->facultativo->name),
                 'tipo' => $guardiaHoy->tipo === 'festivo_24h' ? '24h (Fin de semana)' : '17h (Diaria)',
