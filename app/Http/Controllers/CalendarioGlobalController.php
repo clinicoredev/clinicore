@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Ausencia;
 use App\Models\Guardia;
+use App\Models\Festivo;
 use App\Models\User;
+use App\Services\GuardiaGeneratorService;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
@@ -12,39 +14,56 @@ use Inertia\Inertia;
 
 class CalendarioGlobalController extends Controller
 {
+    public function __construct(
+        private readonly GuardiaGeneratorService $generatorService
+    ) {}
+
     public function index(Request $request)
     {
         $jefe = $request->user();
-        $mes = $request->input('mes', Carbon::now()->month);
-        $anio = $request->input('anio', 2026);
+        $especialidadId = (int) $jefe->especialidad_id;
+        $mes = (int) $request->input('mes', Carbon::now()->month);
+        $anio = (int) $request->input('anio', Carbon::now()->year);
 
-        // Limites matemáticos del mes solicitado
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
         $finMes = Carbon::createFromDate($anio, $mes, 1)->endOfMonth();
 
+        $mapaFestivos = $this->generatorService->obtenerMapaFestivos($especialidadId, $anio);
         $streamEventos = collect();
 
         // 1. INGESTA DE GUARDIAS DEL MES (Adjuntos y Residentes)
-        // Añadimos 'facultativo.roles' para poder leer el cargo de cada médico
-        $guardias = Guardia::where('especialidad_id', $jefe->especialidad_id)
+        $guardias = Guardia::where('especialidad_id', $especialidadId)
             ->whereMonth('fecha', $mes)->whereYear('fecha', $anio)
             ->with('facultativo.roles')->get();
 
         foreach ($guardias as $g) {
+            if (!$g->facultativo) continue;
+            $info = $this->generatorService->clasificarTipologiaGuardia($g, $mapaFestivos);
+            $detalle = $info['es_festivo_especial']
+                ? ('24h [ESPECIAL]' . ($info['modalidad'] === 'localizada' ? ' [Localizada]' : ''))
+                : $info['etiqueta'];
+
             $streamEventos->push([
                 'id' => 'g_' . $g->id,
                 'user_id' => $g->facultativo->id, 
-                'fecha' => $g->fecha->format('Y-m-d'),
+                'fecha' => $info['fecha_str'],
                 'medico' => str_replace(['Dr. ', 'Dra. '], '', $g->facultativo->name),
-                'rol' => $g->facultativo->roles->first()?->name ?? 'Facultativo', // INYECTADO PARA EL FRONTEND
+                'rol' => $g->facultativo->roles->first()?->name ?? 'Facultativo',
                 'tipo' => 'GUARDIA',
-                'detalle' => $g->tipo === 'festivo_24h' ? '24h (Finde)' : '17h (Diaria)',
-                'estilo' => $g->tipo === 'festivo_24h' ? 'guardia_finde' : 'guardia_diaria'
+                'detalle' => $detalle,
+                'modalidad' => $info['modalidad'],
+                'etiqueta_modalidad' => $info['etiqueta_modalidad'],
+                'horas' => $info['horas'],
+                'horas_efectivas' => $info['horas_efectivas_computo'],
+                'categoria' => $info['categoria'],
+                'es_24h' => $info['es_24h'],
+                'es_festivo_oficial' => $info['es_festivo_oficial'],
+                'es_festivo_especial' => $info['es_festivo_especial'],
+                'estilo' => $info['es_24h'] ? 'guardia_finde' : 'guardia_diaria',
             ]);
         }
 
-        // 2. INGESTA Y "EXPLOSIÓN" DE RANGOS DE VACACIONES
-        // Añadimos 'solicitante.roles' al Eager Loading
+        // 2. INGESTA Y "EXPLOSIÓN" DE RANGOS DE AUSENCIAS
         $ausencias = Ausencia::where('especialidad_id', $jefe->especialidad_id)
             ->where('estado', 'aprobada')
             ->where(function ($query) use ($inicioMes, $finMes) {
@@ -55,6 +74,7 @@ class CalendarioGlobalController extends Controller
             ->with('solicitante.roles')->get();
 
         foreach ($ausencias as $a) {
+            if (!$a->solicitante) continue;
             $rango = CarbonPeriod::create(
                 max($a->fecha_inicio, $inicioMes), 
                 min($a->fecha_fin, $finMes)
@@ -66,16 +86,26 @@ class CalendarioGlobalController extends Controller
                     'user_id' => $a->solicitante->id, 
                     'fecha' => $fecha->format('Y-m-d'),
                     'medico' => str_replace(['Dr. ', 'Dra. '], '', $a->solicitante->name),
-                    'rol' => $a->solicitante->roles->first()?->name ?? 'Facultativo', // INYECTADO PARA EL FRONTEND
+                    'rol' => $a->solicitante->roles->first()?->name ?? 'Facultativo',
                     'tipo' => 'AUSENCIA',
                     'detalle' => ucfirst(str_replace('_', ' ', $a->tipo)),
-                    'estilo' => 'ausencia'
+                    // Diferenciamos visualmente la rotación que mantiene guardias
+                    'estilo' => $a->tipo === 'rotacion_con_guardias' ? 'rotacion_guardias' : 'ausencia'
                 ]);
             }
         }
 
-        // 3. RECUPERAR MÉDICOS DEL DEPARTAMENTO PARA EL SELECTOR
-        // Cargamos los roles y mapeamos para tener un array limpio en Vue
+        // 3. FESTIVOS DEL MES
+        $festivos = Festivo::where('especialidad_id', $jefe->especialidad_id)
+            ->whereMonth('fecha', $mes)
+            ->whereYear('fecha', $anio)
+            ->get()
+            ->map(fn($f) => [
+                'fecha' => Carbon::parse($f->fecha)->format('Y-m-d'),
+                'descripcion' => $f->descripcion ?: 'Festivo Oficial'
+            ]);
+
+        // 4. RECUPERAR MÉDICOS DEL DEPARTAMENTO PARA EL SELECTOR
         $medicos = User::where('especialidad_id', $jefe->especialidad_id)
             ->whereDoesntHave('roles', fn($q) => $q->where('name', 'SuperAdmin'))
             ->with('roles')
@@ -90,9 +120,10 @@ class CalendarioGlobalController extends Controller
 
         return Inertia::render('CalendarioGlobal/Index', [
             'eventos' => $streamEventos,
+            'festivos' => $festivos,
             'medicos' => $medicos, 
-            'mes_actual' => (int)$mes,
-            'anio_actual' => (int)$anio
+            'mes_actual' => $mes,
+            'anio_actual' => $anio
         ]);
     }
 }

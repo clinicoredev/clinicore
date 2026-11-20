@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Ausencia;
 use App\Models\User;
+use App\Notifications\EstadoAusenciaModificado;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -42,7 +43,7 @@ class AusenciaController extends Controller
                 'user_id' => $a->user_id,
                 'tipo' => ucfirst(str_replace('_', ' ', $a->tipo)),
                 'tipo_raw' => $a->tipo,
-                'solicitante' => $a->solicitante->name,
+                'solicitante' => $a->solicitante?->name ?? 'Usuario eliminado',
                 'revisor' => $a->revisor?->name ?? 'Pendiente de firma',
                 'fecha_inicio' => $a->fecha_inicio->format('Y-m-d'),
                 'fecha_fin' => $a->fecha_fin->format('Y-m-d'),
@@ -93,11 +94,16 @@ class AusenciaController extends Controller
             'motivo' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $targetUserId = $modoRevisor ? $validated['user_id'] : $usuario->id;
-        
+        $targetUserId = (int) ($modoRevisor ? $validated['user_id'] : $usuario->id);
+        $targetUser = User::findOrFail($targetUserId);
+
+        // F4-01: Blindaje Multi-Tenant estricto en creación de ausencias
+        if ((int) $targetUser->especialidad_id !== (int) $usuario->especialidad_id) {
+            abort(403, 'No puedes tramitar ausencias para personal de otro servicio.');
+        }
+
         // Validar que el Tutor no intente añadir una ausencia a otro Adjunto
-        if ($esTutor && !$esJefe && $targetUserId != $usuario->id) {
-            $targetUser = User::findOrFail($targetUserId);
+        if ($esTutor && !$esJefe && $targetUserId !== (int) $usuario->id) {
             if (!$targetUser->hasAnyRole(['Residente', 'Residente Mayor'])) {
                 abort(403, 'Solo puedes tramitar ausencias de residentes.');
             }
@@ -140,7 +146,7 @@ class AusenciaController extends Controller
         // Validación de permisos de edición
         if (!$esJefe) {
             if ($esTutor && $ausencia->user_id !== $usuario->id) {
-                if (!$ausencia->solicitante->hasAnyRole(['Residente', 'Residente Mayor'])) abort(403);
+                if (!$ausencia->solicitante?->hasAnyRole(['Residente', 'Residente Mayor'])) abort(403);
             } elseif ($ausencia->user_id !== $usuario->id) {
                 abort(403);
             }
@@ -171,7 +177,7 @@ class AusenciaController extends Controller
 
         if (!$esJefe) {
             if ($esTutor && $ausencia->user_id !== $usuario->id) {
-                if (!$ausencia->solicitante->hasAnyRole(['Residente', 'Residente Mayor'])) abort(403);
+                if (!$ausencia->solicitante?->hasAnyRole(['Residente', 'Residente Mayor'])) abort(403);
             } elseif ($ausencia->user_id !== $usuario->id) {
                 abort(403);
             }
@@ -191,10 +197,11 @@ class AusenciaController extends Controller
         $esJefe = $usuario->hasRole('Jefe de Servicio');
         $esTutor = $usuario->hasRole('Tutor de Residentes');
 
+        if ($ausencia->especialidad_id !== $usuario->especialidad_id) abort(403);
         if (!$esJefe && !$esTutor) abort(403);
 
         if ($esTutor && !$esJefe) {
-            $isResidente = $ausencia->solicitante->hasAnyRole(['Residente', 'Residente Mayor']);
+            $isResidente = $ausencia->solicitante?->hasAnyRole(['Residente', 'Residente Mayor']) ?? false;
             if (!$isResidente) abort(403, 'Solo puedes autorizar ausencias de residentes.');
         }
 
@@ -206,6 +213,10 @@ class AusenciaController extends Controller
             'estado' => $validated['estado'],
             'aprobado_por' => $usuario->id,
         ]);
+
+        if ($ausencia->solicitante) {
+            $ausencia->solicitante->notify(new EstadoAusenciaModificado($ausencia));
+        }
 
         return back();
     }

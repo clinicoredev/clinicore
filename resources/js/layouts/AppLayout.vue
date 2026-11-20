@@ -4,7 +4,7 @@ import { usePage, Link, router } from '@inertiajs/vue3';
 import { 
     LayoutDashboard, CalendarDays, Users, LogOut, 
     Activity, CalendarClock, Layers, Building2, ShieldAlert,
-    Menu, X, Bell, GraduationCap, UserCog, PartyPopper
+    Menu, X, Bell, GraduationCap, UserCog, PartyPopper, ArrowLeftRight
 } from '@lucide/vue';
 
 const page = usePage();
@@ -50,6 +50,7 @@ const menuNavegacion = computed(() => {
             items: [
                 { name: 'Guardias Adjuntos', href: '/guardias', icon: CalendarDays },
                 { name: 'Guardias Residentes', href: '/residentes/guardias', icon: GraduationCap },
+                { name: 'Intercambios de Guardia', href: '/permutas', icon: ArrowLeftRight },
             ]
         },
         {

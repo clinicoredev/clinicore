@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid } from '@lucide/vue';
+import {
+    ArrowLeftRight,
+    CalendarClock,
+    CalendarDays,
+    GraduationCap,
+    Layers,
+    LayoutGrid,
+    PartyPopper,
+    Users,
+} from '@lucide/vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -19,22 +28,47 @@ import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
     {
-        title: 'Dashboard',
+        title: 'Panel Principal',
         href: dashboard(),
         icon: LayoutGrid,
+    },
+    {
+        title: 'Calendario Completo',
+        href: '/calendario-completo',
+        icon: Layers,
+    },
+    {
+        title: 'Guardias Adjuntos',
+        href: '/guardias',
+        icon: CalendarDays,
+    },
+    {
+        title: 'Guardias Residentes',
+        href: '/residentes/guardias',
+        icon: GraduationCap,
+    },
+    {
+        title: 'Intercambios de Guardia',
+        href: '/permutas',
+        icon: ArrowLeftRight,
     },
 ];
 
 const footerNavItems: NavItem[] = [
     {
-        title: 'Repository',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: FolderGit2,
+        title: 'Permisos y Ausencias',
+        href: '/ausencias',
+        icon: CalendarClock,
     },
     {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
-        icon: BookOpen,
+        title: 'Festivos Oficiales',
+        href: '/festivos',
+        icon: PartyPopper,
+    },
+    {
+        title: 'Directorio Facultativo',
+        href: '/personal',
+        icon: Users,
     },
 ];
 </script>

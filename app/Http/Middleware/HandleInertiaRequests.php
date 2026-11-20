@@ -44,24 +44,30 @@ class HandleInertiaRequests extends Middleware
                     'email' => $request->user()->email,
                     'es_superadmin' => $request->user()->hasRole('SuperAdmin'),
                     'es_jefe' => $request->user()->hasRole('Jefe de Servicio'),
-                    
+                    'es_tutor' => $request->user()->hasRole('Tutor de Residentes'),
+
                     // Nombres dinámicos extraídos de las relaciones
-                    'especialidad' => $request->user()->especialidad?->nombre ?? 'Administración SaaS',
-                    'hospital' => $request->user()->especialidad?->hospital?->nombre ?? 'Plataforma Central',
+                    'especialidad' => $request->user()->especialidad->nombre ?? 'Administración SaaS',
+                    'hospital' => $request->user()->especialidad->hospital->nombre ?? 'Plataforma Central',
                 ] : null,
-                
-                // LAS NOTIFICACIONES VAN AQUÍ, AL MISMO NIVEL QUE 'user' e 'impersonated'
-                'notificaciones' => $request->user() 
-                    ? $request->user()->unreadNotifications()->take(5)->get() 
+
+                'notificaciones' => $request->user()
+                    ? $request->user()->unreadNotifications()->take(5)->get()
                     : [],
-                'notificaciones_count' => $request->user() 
-                    ? $request->user()->unreadNotifications()->count() 
+                'notificaciones_count' => $request->user()
+                    ? $request->user()->unreadNotifications()->count()
                     : 0,
-                    
+
                 'impersonated' => session()->has('impersonated_by'),
             ],
             'flash' => [
-                'flash_toast' => fn () => $request->session()->get('flash_toast')
+                'flash_toast' => fn() => $request->session()->get('flash_toast'),
+            ],
+            'clinicore' => [
+                'name' => config('clinicore.brand.name', 'CliniCore'),
+                'domain' => config('clinicore.brand.domain', 'clinicore.es'),
+                'email' => config('clinicore.brand.email', 'clinicore.dev@gmail.com'),
+                'includeWatermark' => (bool) config('clinicore.exports.watermark_enabled', true),
             ],
         ];
     }

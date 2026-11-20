@@ -19,11 +19,22 @@ const modalAltaAbierto = ref(false);
 const modalEditarAbierto = ref(false);
 
 const formAlta = useForm({
-    name: '', email: '', rol: 'Facultativo'
+    name: '',
+    email: '',
+    rol: 'Facultativo',
+    porcentaje_jornada: 100,
+    exento_guardias: false,
+    motivo_exencion: '',
 });
 
 const formEditar = useForm({
-    id: null, name: '', email: '', rol: ''
+    id: null,
+    name: '',
+    email: '',
+    rol: '',
+    porcentaje_jornada: 100,
+    exento_guardias: false,
+    motivo_exencion: '',
 });
 
 const enviarAlta = () => {
@@ -37,6 +48,9 @@ const abrirEdicion = (medico) => {
     formEditar.name = medico.name;
     formEditar.email = medico.email;
     formEditar.rol = medico.rol;
+    formEditar.porcentaje_jornada = medico.porcentaje_jornada ?? 100;
+    formEditar.exento_guardias = Boolean(medico.exento_guardias);
+    formEditar.motivo_exencion = medico.motivo_exencion ?? '';
     modalEditarAbierto.value = true;
 };
 
@@ -127,9 +141,14 @@ const eliminarFacultativo = (id, nombre) => {
                             <td class="py-4 px-6 text-zinc-400 text-xs">{{ miembro.creado_el }}</td>
 
                             <td class="py-4 px-6 text-center">
-                                <span class="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Activo
-                                </span>
+                                <div class="flex flex-col items-center gap-1">
+                                    <span v-if="miembro.exento_guardias" class="inline-flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30" :title="miembro.motivo_exencion || 'Exento de guardias'">
+                                        Exento Guardias
+                                    </span>
+                                    <span v-else class="inline-flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Activo ({{ miembro.porcentaje_jornada ?? 100 }}%)
+                                    </span>
+                                </div>
                             </td>
 
                             <td v-if="permisos.es_jefe" class="py-4 px-6 text-right">
@@ -165,6 +184,22 @@ const eliminarFacultativo = (id, nombre) => {
                             <option class="bg-zinc-900" value="Residente">Residente</option>
                         </select>
                     </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-zinc-400 mb-1">% Dedicación Jornada</label>
+                            <input v-model.number="formAlta.porcentaje_jornada" type="number" min="10" max="100" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:outline-none focus:border-emerald-500" />
+                        </div>
+                        <div class="flex items-end pb-2">
+                            <label class="flex items-center gap-2 cursor-pointer text-zinc-300">
+                                <input v-model="formAlta.exento_guardias" type="checkbox" class="rounded border-zinc-700 bg-zinc-950 text-emerald-500" />
+                                <span>Exento de guardias</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div v-if="formAlta.exento_guardias">
+                        <label class="block text-zinc-400 mb-1">Motivo de Exención</label>
+                        <input v-model="formAlta.motivo_exencion" type="text" placeholder="Ej: Mayor de 55 años / Salud laboral" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:outline-none focus:border-emerald-500" />
+                    </div>
                     <div class="flex justify-end gap-3 pt-3 border-t border-zinc-800">
                         <button type="button" @click="modalAltaAbierto = false" class="px-4 py-2 text-zinc-400">Cancelar</button>
                         <button type="submit" :disabled="formAlta.processing" class="px-5 py-2 bg-emerald-500 text-zinc-950 font-bold rounded cursor-pointer disabled:opacity-50">Crear</button>
@@ -199,6 +234,24 @@ const eliminarFacultativo = (id, nombre) => {
                             <option class="bg-zinc-900" value="Residente Mayor">Residente Mayor (Gestión cuadrantes resis)</option>
                             <option class="bg-zinc-900" value="Residente">Residente</option>
                         </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-zinc-400 uppercase mb-1">% Dedicación Jornada</label>
+                            <input v-model.number="formEditar.porcentaje_jornada" type="number" min="10" max="100" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:border-emerald-500 focus:outline-none" />
+                        </div>
+                        <div class="flex items-end pb-2">
+                            <label class="flex items-center gap-2 cursor-pointer text-zinc-300">
+                                <input v-model="formEditar.exento_guardias" type="checkbox" class="rounded border-zinc-700 bg-zinc-950 text-emerald-500" />
+                                <span>Exento de guardias</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div v-if="formEditar.exento_guardias">
+                        <label class="block text-zinc-400 uppercase mb-1">Motivo de Exención</label>
+                        <input v-model="formEditar.motivo_exencion" type="text" placeholder="Ej: Mayor de 55 años / Salud laboral" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:border-emerald-500 focus:outline-none" />
                     </div>
 
                     <div class="flex justify-end gap-3 pt-3 border-t border-zinc-800">

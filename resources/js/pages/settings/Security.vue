@@ -23,7 +23,7 @@ defineOptions({
     layout: {
         breadcrumbs: [
             {
-                title: 'Security settings',
+                title: 'Seguridad y Contraseña',
                 href: edit(),
             },
         ],
@@ -32,15 +32,15 @@ defineOptions({
 </script>
 
 <template>
-    <Head title="Security settings" />
+    <Head title="Seguridad y Contraseña" />
 
-    <h1 class="sr-only">Security settings</h1>
+    <h1 class="sr-only">Ajustes de Seguridad</h1>
 
     <div class="space-y-6">
         <Heading
             variant="small"
-            title="Update password"
-            description="Ensure your account is using a long, random password to stay secure"
+            title="Actualizar Contraseña"
+            description="Asegúrate de utilizar una contraseña larga y segura para proteger tu cuenta clínica"
         />
 
         <Form
@@ -55,41 +55,41 @@ defineOptions({
                 'current_password',
             ]"
             class="space-y-6"
-            v-slot="{ errors, processing }"
+            v-slot="{ errors, processing, recentlySuccessful }"
         >
             <div class="grid gap-2">
-                <Label for="current_password">Current password</Label>
+                <Label for="current_password">Contraseña Actual</Label>
                 <PasswordInput
                     id="current_password"
                     name="current_password"
                     class="mt-1 block w-full"
                     autocomplete="current-password"
-                    placeholder="Current password"
+                    placeholder="Introduce tu contraseña actual"
                 />
                 <InputError :message="errors.current_password" />
             </div>
 
             <div class="grid gap-2">
-                <Label for="password">New password</Label>
+                <Label for="password">Nueva Contraseña</Label>
                 <PasswordInput
                     id="password"
                     name="password"
                     class="mt-1 block w-full"
                     autocomplete="new-password"
-                    placeholder="New password"
+                    placeholder="Nueva contraseña (mín. 8 caracteres)"
                     :passwordrules="props.passwordRules"
                 />
                 <InputError :message="errors.password" />
             </div>
 
             <div class="grid gap-2">
-                <Label for="password_confirmation">Confirm password</Label>
+                <Label for="password_confirmation">Confirmar Nueva Contraseña</Label>
                 <PasswordInput
                     id="password_confirmation"
                     name="password_confirmation"
                     class="mt-1 block w-full"
                     autocomplete="new-password"
-                    placeholder="Confirm password"
+                    placeholder="Repite la nueva contraseña"
                     :passwordrules="props.passwordRules"
                 />
                 <InputError :message="errors.password_confirmation" />
@@ -100,8 +100,11 @@ defineOptions({
                     :disabled="processing"
                     data-test="update-password-button"
                 >
-                    Save
+                    {{ processing ? 'Actualizando...' : 'Actualizar Contraseña' }}
                 </Button>
+                <span v-if="recentlySuccessful" class="text-xs text-emerald-400 font-medium">
+                    ¡Contraseña actualizada!
+                </span>
             </div>
         </Form>
     </div>

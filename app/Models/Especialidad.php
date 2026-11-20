@@ -4,21 +4,37 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property int $id
+ * @property string $nombre
+ * @property int|null $hospital_id
+ * @property-read Hospital|null $hospital
+ */
 class Especialidad extends Model
 {
+    /** @use HasFactory<\Illuminate\Database\Eloquent\Factories\Factory<static>> */
     use HasFactory;
 
-    // 1. Decirle al gringo cómo se hace el plural en castellano:
     protected $table = 'especialidades';
 
-    // 2. Permitir que el Seeder rellene las columnas automáticamente:
     protected $guarded = [];
 
-    public function users()
+    /**
+     * @return HasMany<User, $this>
+     */
+    public function users(): HasMany
     {
         return $this->hasMany(User::class);
     }
 
-    public function hospital() { return $this->belongsTo(Hospital::class); }
+    /**
+     * @return BelongsTo<Hospital, $this>
+     */
+    public function hospital(): BelongsTo
+    {
+        return $this->belongsTo(Hospital::class);
+    }
 }

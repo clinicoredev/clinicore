@@ -36,9 +36,9 @@ export default defineConfig({
             buildBase: '/build/',
             registerType: 'autoUpdate',
             manifest: {
-                name: 'CliniCore SaaS',
+                name: 'CliniCore — Gestión de Guardias Hospitalarias',
                 short_name: 'CliniCore',
-                description: 'Plataforma de Gestión Clínica',
+                description: 'Planificación automática y equitativa de guardias para servicios hospitalarios.',
                 theme_color: '#09090b', // Zinc 950 (Fondo principal de nuestra app)
                 background_color: '#09090b',
                 display: 'standalone', // Esto es lo que oculta la barra de direcciones del navegador

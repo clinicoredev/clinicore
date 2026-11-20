@@ -20,7 +20,9 @@ const form = useForm({
     hospital_nombre: '',
     especialidad_nombre: '',
     jefe_nombre: '',
-    jefe_email: ''
+    jefe_email: '',
+    jefe_rol: 'Jefe de Servicio',
+    enviar_invitacion: true
 });
 
 const desplegarUnidad = () => {
@@ -73,7 +75,7 @@ const actualizarTenant = () => {
         preserveScroll: true,
         onSuccess: () => modalEditTenant.value = false
     });
-}; // <-- ¡Aquí faltaba cerrar bien esta llave en tu código!
+};
 
 // ==========================================
 // FORMULARIOS DE USUARIO (CREAR Y EDITAR)
@@ -84,6 +86,7 @@ const usuarioEditando = ref(null);
 const formNewUser = useForm({
     name: '',
     email: '',
+    password: '',
     especialidad_id: '',
     role: 'Facultativo'
 });
@@ -184,6 +187,17 @@ const eliminarUsuario = (id, nombre) => {
                         </div>
                         <span v-if="form.errors.jefe_email" class="text-rose-400 mt-1 block">{{ form.errors.jefe_email }}</span>
                     </div>
+                    <div>
+                        <label class="block text-zinc-400 uppercase tracking-wide mb-1 font-semibold">Rol del Responsable Inicial</label>
+                        <select v-model="form.jefe_rol" class="w-full bg-zinc-950 text-white p-2.5 rounded border border-zinc-800 focus:border-indigo-500 focus:outline-none font-medium">
+                            <option class="bg-zinc-900" value="Jefe de Servicio">Jefe de Servicio</option>
+                            <option class="bg-zinc-900" value="Residente Mayor">Residente Mayor</option>
+                        </select>
+                    </div>
+                    <label class="flex items-center gap-2.5 cursor-pointer select-none pt-1">
+                        <input v-model="form.enviar_invitacion" type="checkbox" class="rounded border-zinc-700 bg-zinc-950 text-indigo-500 focus:ring-indigo-500" />
+                        <span class="text-zinc-300 font-medium">Enviar correo de activación (/bienvenido) automáticamente</span>
+                    </label>
                     <button type="submit" :disabled="form.processing" class="w-full py-3 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-zinc-950 font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-2 text-sm shadow-lg shadow-indigo-500/10">
                         <Sparkles class="w-4 h-4 fill-zinc-950" />
                         {{ form.processing ? 'Provisionando...' : 'Avanzar Aislamiento' }}
@@ -208,10 +222,10 @@ const eliminarUsuario = (id, nombre) => {
                                 <h4 class="text-white font-bold text-base mt-0.5 group-hover:text-indigo-400 transition-colors">{{ h.nombre }}</h4>
                             </div>
                             <div class="flex items-center gap-1 opacity-20 group-hover:opacity-100 transition-opacity">
-                                <button @click="abrirEditTenant(h)" class="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-indigo-400 rounded-md transition-colors" title="Editar Nombre">
+                                <button @click="abrirEditTenant(h)" class="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-indigo-400 rounded-md transition-colors cursor-pointer" title="Editar Nombre">
                                     <Edit class="w-3.5 h-3.5" />
                                 </button>
-                                <button @click="eliminarTenant(h.id, h.nombre)" class="p-1.5 bg-zinc-900 hover:bg-rose-500/20 text-zinc-400 hover:text-rose-400 rounded-md transition-colors" title="Destruir Tenant">
+                                <button @click="eliminarTenant(h.id, h.nombre)" class="p-1.5 bg-zinc-900 hover:bg-rose-500/20 text-zinc-400 hover:text-rose-400 rounded-md transition-colors cursor-pointer" title="Destruir Tenant">
                                     <Trash2 class="w-3.5 h-3.5" />
                                 </button>
                             </div>
@@ -233,7 +247,7 @@ const eliminarUsuario = (id, nombre) => {
                                 <Users class="w-3.5 h-3.5 text-zinc-600" />
                                 Usuarios registrados
                             </span>
-                            <button @click="abrirGestionUsuarios(h)" class="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/50 rounded-lg transition-all font-semibold flex items-center gap-1.5">
+                            <button @click="abrirGestionUsuarios(h)" class="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/50 rounded-lg transition-all font-semibold flex items-center gap-1.5 cursor-pointer">
                                 <Eye class="w-3.5 h-3.5" /> Auditar
                             </button>
                         </div>
@@ -268,30 +282,31 @@ const eliminarUsuario = (id, nombre) => {
                     {{ $page.props.errors.licencia }}
                 </div>
 
-                <div v-if="modoCrearUsuario" class="p-5 border-b border-zinc-800 bg-zinc-900/50">
-                    <form @submit.prevent="guardarNuevoUsuario" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div v-if="modoCrearUsuario" class="p-5 border-b border-zinc-800 bg-zinc-900/50 space-y-3">
+                    <form @submit.prevent="guardarNuevoUsuario" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <input v-model="formNewUser.name" required type="text" placeholder="Nombre completo" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-sm focus:border-indigo-500 focus:outline-none" />
-                            <!-- Chivato de error de validación -->
+                            <input v-model="formNewUser.name" required type="text" placeholder="Nombre completo" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-xs focus:border-indigo-500 focus:outline-none" />
                             <span v-if="formNewUser.errors.name" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.name }}</span>
                         </div>
                         <div>
-                            <input v-model="formNewUser.email" required type="email" placeholder="Email" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-sm focus:border-indigo-500 focus:outline-none" />
+                            <input v-model="formNewUser.email" required type="email" placeholder="Email corporativo" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-xs focus:border-indigo-500 focus:outline-none" />
                             <span v-if="formNewUser.errors.email" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.email }}</span>
                         </div>
-                        <div class="flex flex-col">
-                            <div class="flex gap-2">
-                                <select v-model="formNewUser.role" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-sm focus:border-indigo-500 focus:outline-none">
-                                    <!-- AHORA SÍ: Usamos Facultativo -->
-                                    <option value="Facultativo">Facultativo (Estándar)</option>
-                                    <option value="Jefe de Servicio">Jefe de Servicio (Admin)</option>
-                                </select>
-                                <button type="submit" :disabled="formNewUser.processing" class="px-4 bg-indigo-500 hover:bg-indigo-400 text-zinc-950 font-bold rounded-lg transition-colors text-sm cursor-pointer disabled:opacity-50">
-                                    Guardar
-                                </button>
-                            </div>
-                            <span v-if="formNewUser.errors.role" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.role }}</span>
-                            <span v-if="formNewUser.errors.especialidad_id" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.especialidad_id }}</span>
+                        <div>
+                            <input v-model="formNewUser.password" required type="password" placeholder="Contraseña temporal" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-xs focus:border-indigo-500 focus:outline-none" />
+                            <span v-if="formNewUser.errors.password" class="text-rose-400 text-[10px] mt-1 block">{{ formNewUser.errors.password }}</span>
+                        </div>
+                        <div class="flex gap-2">
+                            <select v-model="formNewUser.role" class="w-full bg-zinc-950 text-white p-2 rounded-lg border border-zinc-800 text-xs focus:border-indigo-500 focus:outline-none">
+                                <option class="bg-zinc-900" value="Facultativo">Facultativo (Estándar)</option>
+                                <option class="bg-zinc-900" value="Jefe de Servicio">Jefe de Servicio (Admin)</option>
+                                <option class="bg-zinc-900" value="Tutor de Residentes">Tutor de Residentes</option>
+                                <option class="bg-zinc-900" value="Residente Mayor">Residente Mayor</option>
+                                <option class="bg-zinc-900" value="Residente">Residente</option>
+                            </select>
+                            <button type="submit" :disabled="formNewUser.processing" class="px-4 bg-indigo-500 hover:bg-indigo-400 text-zinc-950 font-bold rounded-lg transition-colors text-xs cursor-pointer disabled:opacity-50 shrink-0">
+                                Guardar
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -341,6 +356,9 @@ const eliminarUsuario = (id, nombre) => {
                                 <select v-model="formEditUser.role" class="bg-zinc-900 text-white p-1.5 rounded border border-zinc-700 text-xs">
                                     <option value="Facultativo">Facultativo</option>
                                     <option value="Jefe de Servicio">Jefe de Servicio</option>
+                                    <option value="Tutor de Residentes">Tutor de Residentes</option>
+                                    <option value="Residente Mayor">Residente Mayor</option>
+                                    <option value="Residente">Residente</option>
                                 </select>
                             </div>
                             <div class="flex items-center gap-2">

@@ -2,19 +2,21 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToEspecialidad;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
 class Ausencia extends Model
 {
-    use HasFactory, LogsActivity;
+    /** @use HasFactory<\Illuminate\Database\Eloquent\Factories\Factory<static>> */
+    use BelongsToEspecialidad, HasFactory, LogsActivity;
 
     protected $table = 'ausencias';
     protected $guarded = [];
 
-    // Casts para que Laravel entienda que son fechas reales y no simples Strings
     protected function casts(): array
     {
         return [
@@ -23,20 +25,18 @@ class Ausencia extends Model
         ];
     }
 
-    // Relación al departamento
-    public function especialidad()
-    {
-        return $this->belongsTo(Especialidad::class);
-    }
-
-    // Flecha 1: ¿Quién pidió el día?
-    public function solicitante()
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function solicitante(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
     }
 
-    // Flecha 2: ¿Qué jefe puso la firma?
-    public function revisor()
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function revisor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'aprobado_por');
     }

@@ -10,6 +10,7 @@ use App\Http\Controllers\AusenciaController;
 use App\Http\Controllers\CalendarioGlobalController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GuardiaController;
+use App\Http\Controllers\PermutaSolicitudController;
 use App\Http\Controllers\ResidenteGuardiaController;
 use App\Http\Controllers\FestivoController;
 
@@ -19,6 +20,9 @@ Route::get('/', function () {
         'canRegister' => Route::has('register'),
     ]);
 })->name('home');
+
+Route::get('/privacidad', fn () => Inertia::render('Legal/Privacidad'))->name('legal.privacidad');
+Route::get('/terminos', fn () => Inertia::render('Legal/Terminos'))->name('legal.terminos');
 
 // 1. RUTA PARA SALIR DEL MODO DIOS 
 // (Obligatorio: debe estar FUERA del middleware 'role:SuperAdmin' porque cuando 
@@ -65,6 +69,21 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/ausencias/{ausencia}', [AusenciaController::class, 'update'])->name('ausencias.update');
     Route::delete('/ausencias/{ausencia}', [AusenciaController::class, 'destroy'])->name('ausencias.destroy');
 
+    // MÓDULO SOLICITUDES DE INTERCAMBIO DE GUARDIAS Y BOLSA DE VACANTES (F3-04 / F5-01 / F6-05)
+    Route::get('/permutas', [PermutaSolicitudController::class, 'index'])->name('permutas.index');
+    Route::post('/permutas', [PermutaSolicitudController::class, 'store'])->name('permutas.store');
+    Route::post('/permutas/vacantes', [PermutaSolicitudController::class, 'publicarVacante'])->name('permutas.vacantes.store');
+    Route::patch('/permutas/{permuta}/postular-vacante', [PermutaSolicitudController::class, 'postularVacante'])->name('permutas.vacantes.postular');
+    Route::patch('/permutas/{permuta}/responder-companero', [PermutaSolicitudController::class, 'responderCompanero'])->name('permutas.responderCompanero');
+    Route::patch('/permutas/{permuta}/resolver', [PermutaSolicitudController::class, 'resolver'])->name('permutas.resolver');
+    Route::delete('/permutas/{permuta}', [PermutaSolicitudController::class, 'destroy'])->name('permutas.destroy');
+
+    // SINCRONIZACIÓN ASÍNCRONA Y OAUTH2 DE CALENDARIO (F3-05 / F5-05)
+    Route::post('/calendario/sync-config', [CalendarFeedController::class, 'configurarSync'])->name('calendario.syncConfig');
+    Route::get('/calendario/oauth/redirect', [CalendarFeedController::class, 'oauthRedirect'])->name('calendario.oauth.redirect');
+    Route::get('/calendario/oauth/callback', [CalendarFeedController::class, 'oauthCallback'])->name('calendario.oauth.callback');
+    Route::delete('/calendario/oauth/disconnect', [CalendarFeedController::class, 'oauthDisconnect'])->name('calendario.oauth.disconnect');
+
     // --- MÓDULO GUARDIAS ---
     Route::get('/guardias', [GuardiaController::class, 'index'])->name('guardias.index');
     Route::post('/guardias/limitaciones', [GuardiaController::class, 'storeLimitacion'])->name('guardias.limitaciones.store');
@@ -74,7 +93,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/guardias/exportar/pdf', [GuardiaController::class, 'exportarPdf'])->name('guardias.exportar.pdf');
     
     // Motor IA y Operaciones Fijas
+    Route::post('/guardias/simular', [GuardiaController::class, 'simularAlgoritmo'])->name('guardias.simular');
     Route::post('/guardias/generar', [GuardiaController::class, 'generarAlgoritmo'])->name('guardias.generar');
+    Route::post('/guardias/verificar-conflicto', [GuardiaController::class, 'verificarConflicto'])->name('guardias.verificarConflicto');
     Route::post('/guardias/manual', [GuardiaController::class, 'guardarGuardiaManual'])->name('guardias.manual');
     Route::delete('/guardias/vaciar-mes', [GuardiaController::class, 'vaciarMes'])->name('guardias.vaciarMes');
     Route::post('/guardias/permutar', [GuardiaController::class, 'permutar'])->name('guardias.permutar');
@@ -83,17 +104,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/festivos', [FestivoController::class, 'index'])->name('festivos.index');
     Route::post('/festivos', [FestivoController::class, 'store'])->name('festivos.store');
     Route::delete('/festivos/{festivo}', [FestivoController::class, 'destroy'])->name('festivos.destroy');
+    Route::post('/festivos/precargar', [FestivoController::class, 'precargarNacionales'])->name('festivos.precargar');
     
     // Operaciones sobre una guardia específica (Comodín al final)
     Route::delete('/guardias/{guardia}', [GuardiaController::class, 'destroy'])->name('guardias.destroy');
 
     Route::prefix('residentes')->middleware(['auth'])->group(function () {
         Route::get('/guardias', [ResidenteGuardiaController::class, 'index'])->name('residentes.guardias.index');
+        Route::post('/guardias/simular', [ResidenteGuardiaController::class, 'simularAlgoritmo'])->name('residentes.guardias.simular');
         Route::post('/guardias/generar', [ResidenteGuardiaController::class, 'generarAlgoritmo']);
+        Route::post('/guardias/verificar-conflicto', [ResidenteGuardiaController::class, 'verificarConflicto'])->name('residentes.guardias.verificarConflicto');
         Route::post('/guardias/manual', [ResidenteGuardiaController::class, 'guardarGuardiaManual']);
         Route::post('/guardias/permutar', [ResidenteGuardiaController::class, 'permutar']);
         Route::delete('/guardias/vaciar-mes', [ResidenteGuardiaController::class, 'vaciarMes']);
         Route::delete('/guardias/{guardia}', [ResidenteGuardiaController::class, 'destroy']);
+        Route::get('/guardias/exportar/excel', [ResidenteGuardiaController::class, 'exportarExcel']);
+        Route::get('/guardias/exportar/pdf', [ResidenteGuardiaController::class, 'exportarPdf']);
         
         // Rutas de limitaciones para residentes
         Route::post('/guardias/limitaciones', [ResidenteGuardiaController::class, 'storeLimitacion']);
@@ -102,10 +128,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
 });
 
 Route::get('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'show'])
-    ->name('onboarding.password')->middleware('signed');
+    ->name('onboarding.password');
 
-    Route::post('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'store'])
-        ->name('onboarding.password.store')->middleware('signed');
+Route::post('/bienvenido/{user}', [\App\Http\Controllers\OnboardingController::class, 'store'])
+    ->name('onboarding.password.store');
 
 Route::post('/notificaciones/marcar-leidas', function (\Illuminate\Http\Request $request) {
     // Busca todas las notificaciones no leídas del usuario y las marca como leídas

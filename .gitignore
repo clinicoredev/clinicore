@@ -27,3 +27,6 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+GEMINI.md
+.aiexclude
+AUDIT_CLINICORE.md

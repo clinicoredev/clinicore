@@ -30,20 +30,26 @@ class PersonalController extends Controller
                     'name' => $medico->name,
                     'email' => $medico->email,
                     'rol' => $medico->roles->first()?->name ?? 'Facultativo',
+                    'porcentaje_jornada' => (int) ($medico->porcentaje_jornada ?? 100),
+                    'exento_guardias' => (bool) ($medico->exento_guardias ?? false),
+                    'motivo_exencion' => $medico->motivo_exencion,
                     'creado_el' => $medico->created_at->format('d/m/Y'),
                 ];
             });
 
         $totalOcupado = $miembros->count();
-        $limitePlan = $especialidad->limite_usuarios;
+        $limitePlan = (int) ($especialidad->limite_usuarios ?? 0);
+        $porcentajePlan = $limitePlan > 0
+            ? min((int) round(($totalOcupado / $limitePlan) * 100), 100)
+            : 100;
 
         return Inertia::render('Personal/Index', [
             'miembros' => $miembros,
             'metricas_plan' => [
                 'total' => $totalOcupado,
                 'maximo' => $limitePlan,
-                'porcentaje' => min(round(($totalOcupado / $limitePlan) * 100), 100),
-                'puede_invitar' => $totalOcupado < $limitePlan
+                'porcentaje' => $porcentajePlan,
+                'puede_invitar' => $limitePlan > 0 && $totalOcupado < $limitePlan
             ],
             'permisos' => ['es_jefe' => $esJefe]
         ]);
@@ -52,6 +58,11 @@ class PersonalController extends Controller
     public function store(Request $request)
     {
         $jefe = $request->user();
+
+        if (!$jefe->hasRole('Jefe de Servicio')) {
+            abort(403);
+        }
+
         $especialidad = $jefe->especialidad;
 
         // Comprobación de límites del SaaS
@@ -64,6 +75,9 @@ class PersonalController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
             // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
             'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
+            'porcentaje_jornada' => ['nullable', 'integer', 'between:10,100'],
+            'exento_guardias' => ['nullable', 'boolean'],
+            'motivo_exencion' => ['nullable', 'string', 'max:255'],
         ]);
 
         $nuevoMedico = User::create([
@@ -73,6 +87,9 @@ class PersonalController extends Controller
             'password' => \Illuminate\Support\Facades\Hash::make(\Illuminate\Support\Str::random(32)),
             'especialidad_id' => $jefe->especialidad_id,
             'calendar_token' => \Illuminate\Support\Str::random(40),
+            'porcentaje_jornada' => (int) ($validated['porcentaje_jornada'] ?? 100),
+            'exento_guardias' => (bool) ($validated['exento_guardias'] ?? false),
+            'motivo_exencion' => $validated['motivo_exencion'] ?? null,
         ]);
 
         $nuevoMedico->assignRole($validated['rol']);
@@ -98,11 +115,17 @@ class PersonalController extends Controller
             'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)], 
             // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
             'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
+            'porcentaje_jornada' => ['nullable', 'integer', 'between:10,100'],
+            'exento_guardias' => ['nullable', 'boolean'],
+            'motivo_exencion' => ['nullable', 'string', 'max:255'],
         ]);
 
         $user->update([
             'name' => $validated['name'],
             'email' => $validated['email'],
+            'porcentaje_jornada' => isset($validated['porcentaje_jornada']) ? (int) $validated['porcentaje_jornada'] : ($user->porcentaje_jornada ?? 100),
+            'exento_guardias' => isset($validated['exento_guardias']) ? (bool) $validated['exento_guardias'] : ($user->exento_guardias ?? false),
+            'motivo_exencion' => array_key_exists('motivo_exencion', $validated) ? $validated['motivo_exencion'] : $user->motivo_exencion,
         ]);
 
         $user->syncRoles([$validated['rol']]); // Spatie actualiza el cargo

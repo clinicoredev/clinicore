@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToEspecialidad;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Festivo extends Model
 {
-    use HasFactory;
+    /** @use HasFactory<\Illuminate\Database\Eloquent\Factories\Factory<static>> */
+    use BelongsToEspecialidad, HasFactory;
 
     protected $fillable = [
         'especialidad_id',
@@ -16,12 +18,6 @@ class Festivo extends Model
     ];
 
     protected $casts = [
-        'fecha' => 'date', // Asegura que Laravel lo trate como un objeto de fecha
+        'fecha' => 'date',
     ];
-
-    // Relación con el Tenant (Especialidad)
-    public function especialidad()
-    {
-        return $this->belongsTo(Especialidad::class);
-    }
 }

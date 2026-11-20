@@ -8,13 +8,13 @@ import { initializeFlashToast } from '@/lib/flashToast';
 import VCalendar from 'v-calendar';
 import 'v-calendar/style.css';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'CliniCore';
 
 createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
     layout: (name) => {
         switch (true) {
-            case name === 'Welcome':
+            case name === 'Welcome' || name.startsWith('Legal/'):
                 return null;
             case name.startsWith('auth/'):
                 return AuthLayout;
@@ -28,6 +28,7 @@ createInertiaApp({
         color: '#4B5563',
     },
     setup({ el, App, props, plugin }) {
+        if (!el) return;
         createApp({ render: () => h(App, props) })
             .use(plugin)
             .use(VCalendar, {}) // <--- Esto instala <VCalendar> y <VDatePicker> automáticamente
