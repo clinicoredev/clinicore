@@ -63,7 +63,26 @@ class PermutaSolicitudController extends Controller
             });
         }
 
-        $solicitudes = $query->latest()->get()->map(function (SolicitudPermuta $s) use ($usuario, $esJefe, $esTutor, $colectivoUsuario): array {
+        $hoy = Carbon::today()->toDateString();
+        $anioActual = Carbon::today()->year;
+        $mapaFestivos = $this->generatorService->obtenerMapaFestivos($especialidadId);
+
+        // Pre-cálculo de horas anuales y semanales por facultativo para mostrar impacto en equidad y aviso 48h/semana
+        $guardiasAnioServicio = Guardia::where('especialidad_id', $especialidadId)
+            ->whereYear('fecha', $anioActual)
+            ->get();
+
+        $horasAnioPorUsuario = [];
+        $horasSemanaPorUsuario = [];
+        foreach ($guardiasAnioServicio as $ga) {
+            $uId = (int) $ga->user_id;
+            $infoGa = $this->generatorService->clasificarTipologiaGuardia($ga, $mapaFestivos);
+            $horasAnioPorUsuario[$uId] = ($horasAnioPorUsuario[$uId] ?? 0) + (int) $infoGa['horas_efectivas_computo'];
+            $semKey = Carbon::parse($ga->fecha)->format('o-\WW');
+            $horasSemanaPorUsuario[$uId][$semKey] = ($horasSemanaPorUsuario[$uId][$semKey] ?? 0) + (int) $infoGa['horas_efectivas_computo'];
+        }
+
+        $solicitudes = $query->latest()->get()->map(function (SolicitudPermuta $s) use ($usuario, $esJefe, $esTutor, $colectivoUsuario, $mapaFestivos, $horasAnioPorUsuario, $horasSemanaPorUsuario): array {
             $esVacante = ($s->tipo_solicitud ?? 'permuta') === 'cobertura_vacante' || $s->guardia_destino_id === null;
             $fechaOrigen = $s->guardiaOrigen?->fecha ? Carbon::parse($s->guardiaOrigen->fecha)->format('d/m/Y') : 'Eliminada';
             $fechaDestino = $esVacante
@@ -86,6 +105,40 @@ class PermutaSolicitudController extends Controller
             $puedeCancelar = in_array($s->estado, self::ESTADOS_ACTIVOS, true)
                 && ($esJefe || (int) $s->solicitante_id === (int) $usuario->id);
 
+            $impactoEquidad = null;
+            if (in_array($s->estado, self::ESTADOS_ACTIVOS, true) && $s->guardiaOrigen) {
+                $infoOrig = $this->generatorService->clasificarTipologiaGuardia($s->guardiaOrigen, $mapaFestivos);
+                $hOrig = (int) $infoOrig['horas_efectivas_computo'];
+                $hDest = $s->guardiaDestino ? (int) $this->generatorService->clasificarTipologiaGuardia($s->guardiaDestino, $mapaFestivos)['horas_efectivas_computo'] : 0;
+                $solId = (int) $s->solicitante_id;
+                $destId = $s->destinatario_id ? (int) $s->destinatario_id : null;
+
+                $supera48h = false;
+                if ($destId !== null) {
+                    $semOrig = Carbon::parse($s->guardiaOrigen->fecha)->format('o-\WW');
+                    $horasDestSem = ($horasSemanaPorUsuario[$destId][$semOrig] ?? 0) + $hOrig;
+                    if ($horasDestSem > 48) {
+                        $supera48h = true;
+                    }
+                }
+                if (!$esVacante && $s->guardiaDestino) {
+                    $semDest = Carbon::parse($s->guardiaDestino->fecha)->format('o-\WW');
+                    $horasSolSem = ($horasSemanaPorUsuario[$solId][$semDest] ?? 0) + $hDest;
+                    if ($horasSolSem > 48) {
+                        $supera48h = true;
+                    }
+                }
+
+                $impactoEquidad = [
+                    'horas_origen' => $hOrig,
+                    'horas_destino' => $hDest,
+                    'delta_destinatario' => $esVacante ? $hOrig : ($hOrig - $hDest),
+                    'solicitante_horas_anio' => $horasAnioPorUsuario[$solId] ?? 0,
+                    'destinatario_horas_anio' => $destId !== null ? ($horasAnioPorUsuario[$destId] ?? 0) : null,
+                    'supera_48h_semana' => $supera48h,
+                ];
+            }
+
             return [
                 'id' => $s->id,
                 'tipo_solicitud' => $esVacante ? 'cobertura_vacante' : 'permuta',
@@ -107,24 +160,23 @@ class PermutaSolicitudController extends Controller
                 'puede_postular_vacante' => $puedePostularVacante,
                 'puede_firmar' => $puedeFirmar,
                 'puede_cancelar' => $puedeCancelar,
+                'impacto_equidad' => $impactoEquidad,
             ];
         });
-
-        $hoy = Carbon::today()->toDateString();
-        $mapaFestivos = $this->generatorService->obtenerMapaFestivos($especialidadId);
 
         $misGuardias = Guardia::where('especialidad_id', $especialidadId)
             ->where('user_id', $usuario->id)
             ->whereDate('fecha', '>=', $hoy)
             ->orderBy('fecha')
             ->get()
-            ->map(function (Guardia $g) use ($mapaFestivos): array {
+            ->map(function (Guardia $g) use ($mapaFestivos, $colectivoUsuario): array {
                 $info = $this->generatorService->clasificarTipologiaGuardia($g, $mapaFestivos);
                 return [
                     'id' => $g->id,
                     'fecha' => $info['fecha_str'],
                     'fecha_formateada' => Carbon::parse($g->fecha)->format('d/m/Y'),
                     'etiqueta' => $info['etiqueta'],
+                    'colectivo' => $colectivoUsuario,
                 ];
             });
 

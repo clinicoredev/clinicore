@@ -34,6 +34,14 @@ interface SolicitudPermutaItem {
     puede_postular_vacante?: boolean;
     puede_firmar: boolean;
     puede_cancelar?: boolean;
+    impacto_equidad?: {
+        horas_origen: number;
+        horas_destino: number;
+        delta_destinatario: number;
+        solicitante_horas_anio: number;
+        destinatario_horas_anio: number | null;
+        supera_48h_semana: boolean;
+    } | null;
 }
 
 interface GuardiaPropiaOption {
@@ -41,6 +49,7 @@ interface GuardiaPropiaOption {
     fecha: string;
     fecha_formateada: string;
     etiqueta: string;
+    colectivo?: 'adjuntos' | 'residentes';
 }
 
 interface GuardiaCompaneroOption {
@@ -83,6 +92,13 @@ const props = defineProps<{
 }>();
 
 const page = usePage();
+const conflictoError = computed(() => (page.props.errors as Record<string, string> | undefined)?.conflicto ?? '');
+const cerrarConflictoError = () => {
+    const errors = page.props.errors as Record<string, string> | undefined;
+    if (errors?.conflicto) {
+        delete errors.conflicto;
+    }
+};
 const usuarioActualId = computed(() => Number((page.props.auth as any)?.user?.id ?? 0));
 const modoFormulario = ref<'permuta' | 'vacante'>('permuta');
 const filtroEstado = ref<'todos' | 'pendiente' | 'aprobada' | 'rechazada'>('todos');
@@ -117,9 +133,11 @@ const obtenerCsrfToken = (): string => {
     return match ? decodeURIComponent(match[1]) : '';
 };
 
-const basePathVerificacion = computed(() =>
-    props.colectivo_usuario === 'residentes' ? '/residentes/guardias' : '/guardias',
-);
+const basePathVerificacion = computed(() => {
+    const origen = (props.mis_guardias ?? []).find((g) => Number(g.id) === Number(form.guardia_origen_id));
+    const col = origen?.colectivo ?? props.colectivo_usuario;
+    return col === 'residentes' ? '/residentes/guardias' : '/guardias';
+});
 
 watch(
     () => [form.guardia_origen_id, form.guardia_destino_id],
@@ -192,16 +210,16 @@ const cancelarSolicitud = (id: number) => {
     <div class="space-y-6 max-w-6xl mx-auto">
         <!-- BANNER ERRORES -->
         <div
-            v-if="(page.props.errors as Record<string, string>)?.conflicto"
+            v-if="conflictoError"
             class="p-4 bg-rose-500/20 border-2 border-rose-500/50 rounded-2xl flex items-center gap-3 text-rose-200"
         >
             <ShieldAlert class="w-6 h-6 text-rose-400 shrink-0" />
             <div class="text-xs sm:text-sm font-medium">
-                {{ (page.props.errors as Record<string, string>).conflicto }}
+                {{ conflictoError }}
             </div>
             <button
                 type="button"
-                @click="delete (page.props.errors as Record<string, string>).conflicto"
+                @click="cerrarConflictoError"
                 class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer"
             >
                 <X class="w-5 h-5" />
@@ -445,6 +463,22 @@ const cancelarSolicitud = (id: number) => {
                             </p>
 
                             <p class="text-[11px] text-zinc-400 italic">"{{ item.motivo }}"</p>
+
+                            <div v-if="item.impacto_equidad" class="flex flex-wrap items-center gap-2 pt-1">
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 border border-zinc-800 text-zinc-300">
+                                    Equidad anual: {{ item.impacto_equidad.solicitante_horas_anio }}h
+                                    <template v-if="item.impacto_equidad.destinatario_horas_anio !== null">
+                                        → {{ item.impacto_equidad.destinatario_horas_anio }}h
+                                        ({{ item.impacto_equidad.delta_destinatario >= 0 ? '+' : '' }}{{ item.impacto_equidad.delta_destinatario }}h)
+                                    </template>
+                                </span>
+                                <span
+                                    v-if="item.impacto_equidad.supera_48h_semana"
+                                    class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300"
+                                >
+                                    Aviso: supera 48h/semana ISO
+                                </span>
+                            </div>
 
                             <p v-if="item.revisor" class="text-[10px] font-mono text-zinc-500">
                                 Revisado por {{ item.revisor }} ({{ item.resuelto_at }})

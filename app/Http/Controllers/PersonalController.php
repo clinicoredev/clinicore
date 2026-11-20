@@ -65,8 +65,12 @@ class PersonalController extends Controller
 
         $especialidad = $jefe->especialidad;
 
-        // Comprobación de límites del SaaS
-        if (User::where('especialidad_id', $jefe->especialidad_id)->count() >= $especialidad->limite_usuarios) {
+        // Comprobación de límites del SaaS (excluyendo SuperAdmin)
+        $totalActivos = User::where('especialidad_id', $jefe->especialidad_id)
+            ->whereDoesntHave('roles', fn($q) => $q->where('name', 'SuperAdmin'))
+            ->count();
+
+        if ($totalActivos >= $especialidad->limite_usuarios) {
             return back()->withErrors(['limite' => 'Plan al límite de capacidad.']);
         }
 
@@ -74,7 +78,7 @@ class PersonalController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
             // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
-            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
+            'rol' => ['required', Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Facultativo Adjunto', 'Residente', 'Residente Mayor'])],
             'porcentaje_jornada' => ['nullable', 'integer', 'between:10,100'],
             'exento_guardias' => ['nullable', 'boolean'],
             'motivo_exencion' => ['nullable', 'string', 'max:255'],
@@ -114,7 +118,7 @@ class PersonalController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)], 
             // AÑADIDO: Residente Mayor y Tutor de Residentes (corregido)
-            'rol' => ['required', \Illuminate\Validation\Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Residente', 'Residente Mayor'])],
+            'rol' => ['required', Rule::in(['Jefe de Servicio', 'Tutor de Residentes', 'Facultativo', 'Facultativo Adjunto', 'Residente', 'Residente Mayor'])],
             'porcentaje_jornada' => ['nullable', 'integer', 'between:10,100'],
             'exento_guardias' => ['nullable', 'boolean'],
             'motivo_exencion' => ['nullable', 'string', 'max:255'],

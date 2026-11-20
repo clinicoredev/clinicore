@@ -48,7 +48,8 @@ function crearTenantConUsuarios(): array
 
 test('F1-01: Onboarding POST rechaza peticiones sin firma válida y acepta firma válida', function () {
     $data = crearTenantConUsuarios();
-    $user = $data['adjunto1'];
+    $user = User::factory()->unverified()->create(['especialidad_id' => $data['esp1']->id]);
+    $user->assignRole('Facultativo');
 
     $this->post("/bienvenido/{$user->id}", [
         'password' => 'Password123!',

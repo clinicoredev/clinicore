@@ -1171,8 +1171,9 @@ class GuardiaGeneratorService
         $prorratearAusencias = (bool) ($params['prorratear_ausencias'] ?? true);
         $usarMemoriaAnual = (bool) ($params['usar_memoria_anual'] ?? true);
         $agrupacion = (string) ($params['agrupacion'] ?? 'ninguna');
-        $modalidadTurno = in_array((string) ($params['modalidad'] ?? 'presencial'), ['presencial', 'localizada'], true)
-            ? (string) $params['modalidad']
+        $modalidadParam = (string) ($params['modalidad'] ?? 'presencial');
+        $modalidadTurno = in_array($modalidadParam, ['presencial', 'localizada'], true)
+            ? $modalidadParam
             : 'presencial';
 
         $inicioMes = Carbon::createFromDate($anio, $mes, 1)->startOfMonth();
@@ -1367,24 +1368,90 @@ class GuardiaGeneratorService
             ->whereMonth('fecha', '!=', $mes)
             ->get();
 
+        /** @var array<int, string> $primeraFechaAnualPorMedico */
+        $primeraFechaAnualPorMedico = [];
+
         foreach ($historicoAnual as $h) {
             $uId = (int) $h->user_id;
             if (!isset($stats[$uId])) {
                 continue;
             }
-            $fStr = Carbon::parse($h->fecha)->format('Y-m-d');
+            $infoH = $this->clasificarTipologiaGuardia($h, $mapaFestivosAnio);
+            $fStr = $infoH['fecha_str'];
+            if (!isset($primeraFechaAnualPorMedico[$uId]) || $fStr < $primeraFechaAnualPorMedico[$uId]) {
+                $primeraFechaAnualPorMedico[$uId] = $fStr;
+            }
             $stats[$uId]['total_anual']++;
-            $stats[$uId]['puntos_esfuerzo_anual'] += ($h->tipo === 'festivo_24h' ? 2 : 1);
-            if ($h->tipo === 'festivo_24h') {
+            $stats[$uId]['puntos_esfuerzo_anual'] += ($infoH['es_24h'] ? 2 : 1);
+            if ($infoH['es_24h']) {
                 $stats[$uId]['findes_anual']++;
             }
-            if (isset($mapaFestivosAnio[$fStr])) {
-                if ($mapaFestivosAnio[$fStr]['es_especial']) {
+            if ($infoH['es_festivo_oficial']) {
+                if ($infoH['es_festivo_especial']) {
                     $stats[$uId]['especiales_anual']++;
                 } else {
                     $stats[$uId]['festivos_anual']++;
                 }
             }
+        }
+
+        // Normalización YTD por días activos ponderados (sin depender de created_at)
+        $inicioAnio = Carbon::createFromDate($anio, 1, 1)->startOfDay();
+        $diasTranscurridosAnio = $mes > 1 ? max(1, (int) $inicioAnio->diffInDays($inicioMes)) : 0;
+        $ausenciasAnioPorMedico = collect();
+        if ($mes > 1 && !empty($idsGrupo)) {
+            $ausenciasAnioPorMedico = Ausencia::where('especialidad_id', $especialidadId)
+                ->whereIn('user_id', $idsGrupo)
+                ->where('estado', 'aprobada')
+                ->where('tipo', '!=', 'rotacion_con_guardias')
+                ->where('fecha_inicio', '<', $inicioMes->toDateString())
+                ->where('fecha_fin', '>=', $inicioAnio->toDateString())
+                ->get()
+                ->groupBy('user_id');
+        }
+
+        foreach ($medicos as $m) {
+            $mId = (int) $m->id;
+            $factorJ = max(0.1, (float) ($stats[$mId]['factor_jornada'] ?? 1.0));
+            $stats[$mId]['tasa_puntos_anual'] = 0.0;
+            $stats[$mId]['tasa_findes_anual'] = 0.0;
+            $stats[$mId]['ratio_actividad_anio'] = 0.0;
+            $stats[$mId]['festivos_comparables'] = (float) $stats[$mId]['festivos_anual'];
+            $stats[$mId]['especiales_comparables'] = (float) $stats[$mId]['especiales_anual'];
+
+            if ($mes <= 1 || $stats[$mId]['total_anual'] === 0 || !isset($primeraFechaAnualPorMedico[$mId])) {
+                continue;
+            }
+
+            $inicioActivo = Carbon::parse($primeraFechaAnualPorMedico[$mId])->startOfMonth();
+            if ($inicioActivo->lt($inicioAnio)) {
+                $inicioActivo = $inicioAnio->copy();
+            }
+            $finPrevioMes = $inicioMes->copy()->subDay()->startOfDay();
+            $diasDesdeInicio = max(1, (int) $inicioActivo->diffInDays($inicioMes));
+
+            $diasAusenciaAnio = 0;
+            foreach ($ausenciasAnioPorMedico->get($mId, collect()) as $ausAnt) {
+                $aIni = Carbon::parse($ausAnt->fecha_inicio)->startOfDay();
+                $aFin = Carbon::parse($ausAnt->fecha_fin)->startOfDay();
+                if ($aIni->lt($inicioActivo)) {
+                    $aIni = $inicioActivo->copy();
+                }
+                if ($aFin->gt($finPrevioMes)) {
+                    $aFin = $finPrevioMes->copy();
+                }
+                if ($aIni->lte($aFin)) {
+                    $diasAusenciaAnio += ((int) $aIni->diffInDays($aFin) + 1);
+                }
+            }
+
+            $diasActivosBrutos = max(15, $diasDesdeInicio - $diasAusenciaAnio);
+            $diasActivosPonderados = max(15.0, $diasActivosBrutos * $factorJ);
+            $ratioActividad = min(1.0, $diasActivosPonderados / max(1, $diasTranscurridosAnio));
+
+            $stats[$mId]['ratio_actividad_anio'] = $ratioActividad;
+            $stats[$mId]['tasa_puntos_anual'] = ($stats[$mId]['puntos_esfuerzo_anual'] / $diasActivosPonderados) * 30.0;
+            $stats[$mId]['tasa_findes_anual'] = ($stats[$mId]['findes_anual'] / $diasActivosPonderados) * 30.0;
         }
 
         // F6-06: Rotación interanual de festivos [ESPECIAL] (Navidad, Nochebuena, Nochevieja, Año Nuevo, etc.)
@@ -1411,11 +1478,13 @@ class GuardiaGeneratorService
             }
         }
 
-        // Hándicap de Media para Nuevas Incorporaciones
+        // Hándicap de Media e Imputación Proporcional en Festivos para Nuevas Incorporaciones o Bajas Largas
         $veteranos = collect($stats)->filter(fn(array $s): bool => $s['total_anual'] > 0);
         if ($veteranos->isNotEmpty()) {
             $mediaPuntosAnual = (float) $veteranos->avg('puntos_esfuerzo_anual');
             $mediaFindesAnual = (float) $veteranos->avg('findes_anual');
+            $mediaTasaPuntos = (float) $veteranos->avg('tasa_puntos_anual');
+            $mediaTasaFindes = (float) $veteranos->avg('tasa_findes_anual');
             $mediaFestivosAnual = (float) $veteranos->avg('festivos_anual');
             $mediaEspecialesAnual = (float) $veteranos->avg('especiales_anual');
 
@@ -1424,8 +1493,16 @@ class GuardiaGeneratorService
                 if ($stats[$mId]['total_anual'] === 0) {
                     $stats[$mId]['puntos_esfuerzo_anual'] = round($mediaPuntosAnual, 1);
                     $stats[$mId]['findes_anual'] = round($mediaFindesAnual, 1);
+                    $stats[$mId]['tasa_puntos_anual'] = round($mediaTasaPuntos, 2);
+                    $stats[$mId]['tasa_findes_anual'] = round($mediaTasaFindes, 2);
                     $stats[$mId]['festivos_anual'] = (int) floor($mediaFestivosAnual);
                     $stats[$mId]['especiales_anual'] = (int) floor($mediaEspecialesAnual);
+                    $stats[$mId]['festivos_comparables'] = $mediaFestivosAnual;
+                    $stats[$mId]['especiales_comparables'] = $mediaEspecialesAnual;
+                } else {
+                    $ratioAct = (float) ($stats[$mId]['ratio_actividad_anio'] ?? 1.0);
+                    $stats[$mId]['festivos_comparables'] = (float) $stats[$mId]['festivos_anual'] + ($mediaFestivosAnual * (1.0 - $ratioAct));
+                    $stats[$mId]['especiales_comparables'] = (float) $stats[$mId]['especiales_anual'] + ($mediaEspecialesAnual * (1.0 - $ratioAct));
                 }
             }
         }
@@ -1481,7 +1558,8 @@ class GuardiaGeneratorService
             $exacto = $totalSlotsFindePuro * ($pesoM / $sumaPesosFinde);
             $base = (int) min($diasFindeDisponiblesPorMedico[$mId], floor($exacto));
             $cuotaExactaFinde[$mId] = $base;
-            $restosFinde[$mId] = ($exacto - $base) - ($stats[$mId]['findes_anual'] * 0.001);
+            $desempateAnual = $usarMemoriaAnual ? ($stats[$mId]['tasa_findes_anual'] * 0.001) : 0.0;
+            $restosFinde[$mId] = ($exacto - $base) - $desempateAnual;
             $sumaCuotasAsignadas += $base;
         }
 
@@ -1521,6 +1599,43 @@ class GuardiaGeneratorService
                 $stats[$uId]['diarias_mes']++;
                 $stats[$uId]['puntos_esfuerzo'] += 1;
             }
+        }
+
+        // Precalcular horas de la semana ISO de frontera del mes anterior y manuales ya fijadas para penalización suave >48h/sem
+        /** @var array<int, array<string, int>> $horasSemanaIsoMesAnterior */
+        $horasSemanaIsoMesAnterior = [];
+        $inicioSemanaPrimerDiaMes = $inicioMes->copy()->startOfWeek(Carbon::MONDAY);
+        if ($inicioSemanaPrimerDiaMes->lt($inicioMes)) {
+            $mapaFestivosMesAnt = (int) $inicioSemanaPrimerDiaMes->year === $anio
+                ? $mapaFestivosAnio
+                : $this->obtenerMapaFestivos($especialidadId, (int) $inicioSemanaPrimerDiaMes->year);
+
+            $guardiasSemanaIsoAnt = Guardia::where('especialidad_id', $especialidadId)
+                ->whereIn('user_id', $idsGrupo)
+                ->whereDate('fecha', '>=', $inicioSemanaPrimerDiaMes->toDateString())
+                ->whereDate('fecha', '<', $inicioMes->toDateString())
+                ->get();
+
+            foreach ($guardiasSemanaIsoAnt as $gaAnt) {
+                $uIdAnt = (int) $gaAnt->user_id;
+                $infoAnt = $this->clasificarTipologiaGuardia($gaAnt, $mapaFestivosMesAnt);
+                $semKeyAnt = Carbon::parse($gaAnt->fecha)->format('o-\WW');
+                $horasSemanaIsoMesAnterior[$uIdAnt][$semKeyAnt] = ($horasSemanaIsoMesAnterior[$uIdAnt][$semKeyAnt] ?? 0)
+                    + (int) $infoAnt['horas_efectivas_computo'];
+            }
+        }
+
+        /** @var array<int, array<string, int>> $horasSemanalesEnCurso */
+        $horasSemanalesEnCurso = $horasSemanaIsoMesAnterior;
+        foreach ($guardiasManualesGrupo as $gm) {
+            $uId = (int) $gm->user_id;
+            if (!isset($stats[$uId])) {
+                continue;
+            }
+            $infoGm = $this->clasificarTipologiaGuardia($gm, $mapaFestivosAnio);
+            $semKeyGm = Carbon::parse($gm->fecha)->format('o-\WW');
+            $horasSemanalesEnCurso[$uId][$semKeyGm] = ($horasSemanalesEnCurso[$uId][$semKeyGm] ?? 0)
+                + (int) $infoGm['horas_efectivas_computo'];
         }
 
         /** @var array<int, array<string, mixed>> $guardiasAInsertar */
@@ -1634,6 +1749,7 @@ class GuardiaGeneratorService
             $medicos,
             $esElegible,
             &$stats,
+            &$horasSemanalesEnCurso,
             $cuotaExactaFinde,
             $usarMemoriaAnual,
             $esFindeOFiesta,
@@ -1679,6 +1795,7 @@ class GuardiaGeneratorService
             $candidatosPuntuados = $candidatos->map(function (User $m) use (
                 $fechasBloque,
                 &$stats,
+                &$horasSemanalesEnCurso,
                 $cuotaExactaFinde,
                 $usarMemoriaAnual,
                 $esFindeOFiesta,
@@ -1692,10 +1809,15 @@ class GuardiaGeneratorService
                 $nFindePuro = 0;
                 $nFestivoNormal = 0;
                 $nFestivoEspecial = 0;
+                $horasPorSemanaBloque = [];
                 foreach ($fechasBloque as $f) {
-                    if ($esFindeOFiesta($f)) {
+                    $es24Dia = $esFindeOFiesta($f);
+                    if ($es24Dia) {
                         $n24h++;
                     }
+                    $semKey = $f->format('o-\WW');
+                    $horasPorSemanaBloque[$semKey] = ($horasPorSemanaBloque[$semKey] ?? 0) + ($es24Dia ? 24 : 17);
+
                     if ($esFiestaEspecial($f)) {
                         $nFestivoEspecial++;
                     } elseif ($esFiestaOficial($f)) {
@@ -1711,16 +1833,24 @@ class GuardiaGeneratorService
                 $score = 0.0;
 
                 if ($nFestivoEspecial > 0) {
-                    $score += ($stats[$mId]['especiales_anual'] * 5000000);
                     if ($usarMemoriaAnual) {
+                        $score += ((float) ($stats[$mId]['especiales_comparables'] ?? $stats[$mId]['especiales_anual']) * 5000000);
                         $score += (($stats[$mId]['especiales_anio_anterior'] ?? 0) * 2500000);
+                        $score += ((float) ($stats[$mId]['festivos_comparables'] ?? $stats[$mId]['festivos_anual']) * 500000);
+                    } else {
+                        $score += ($stats[$mId]['especiales_mes'] * 5000000);
+                        $score += ($stats[$mId]['festivos_mes'] * 500000);
                     }
-                    $score += ($stats[$mId]['festivos_anual'] * 500000);
                 }
 
                 if ($nFestivoNormal > 0) {
-                    $score += ($stats[$mId]['festivos_anual'] * 3000000);
-                    $score += ($stats[$mId]['especiales_anual'] * 500000);
+                    if ($usarMemoriaAnual) {
+                        $score += ((float) ($stats[$mId]['festivos_comparables'] ?? $stats[$mId]['festivos_anual']) * 3000000);
+                        $score += ((float) ($stats[$mId]['especiales_comparables'] ?? $stats[$mId]['especiales_anual']) * 500000);
+                    } else {
+                        $score += ($stats[$mId]['festivos_mes'] * 3000000);
+                        $score += ($stats[$mId]['especiales_mes'] * 500000);
+                    }
                 }
 
                 if ($nFindePuro > 0) {
@@ -1738,16 +1868,24 @@ class GuardiaGeneratorService
                     $score += ($stats[$mId]['findes_puros_mes'] * 300000);
                 }
 
+                // Penalización suave (no bloqueante) si la asignación supera las 48h en esa semana ISO
+                foreach ($horasPorSemanaBloque as $semKey => $hBloqueSem) {
+                    $totalSem = (int) ($horasSemanalesEnCurso[$mId][$semKey] ?? 0) + $hBloqueSem;
+                    if ($totalSem > 48) {
+                        $score += 200000;
+                    }
+                }
+
                 $puntosNuevos = ($n24h * 2) + (count($fechasBloque) - $n24h);
                 $ratioEsfuerzoMes = ($stats[$mId]['puntos_esfuerzo'] + $puntosNuevos) / $diasDispPonderados;
                 $score += ($ratioEsfuerzoMes * 100000);
 
                 if ($usarMemoriaAnual) {
-                    $mediaGrupoPuntos = (float) (collect($stats)->avg('puntos_esfuerzo_anual') ?: 1);
-                    $mediaGrupoFindes = (float) (collect($stats)->avg('findes_anual') ?: 1);
+                    $mediaGrupoTasaPuntos = (float) (collect($stats)->avg('tasa_puntos_anual') ?: 1);
+                    $mediaGrupoTasaFindes = (float) (collect($stats)->avg('tasa_findes_anual') ?: 1);
 
-                    $desviacionPuntos = max(-4.0, min(4.0, (float) $stats[$mId]['puntos_esfuerzo_anual'] - $mediaGrupoPuntos));
-                    $desviacionFindes = max(-2.0, min(2.0, (float) $stats[$mId]['findes_anual'] - $mediaGrupoFindes));
+                    $desviacionPuntos = max(-4.0, min(4.0, (float) ($stats[$mId]['tasa_puntos_anual'] ?? 0) - $mediaGrupoTasaPuntos));
+                    $desviacionFindes = max(-2.0, min(2.0, (float) ($stats[$mId]['tasa_findes_anual'] ?? 0) - $mediaGrupoTasaFindes));
 
                     $score += ($desviacionPuntos * 2500);
                     if ($n24h > 0) {
@@ -1767,6 +1905,7 @@ class GuardiaGeneratorService
             &$stats,
             &$mapaFechasOcupadas,
             &$conteoCubiertosPorFecha,
+            &$horasSemanalesEnCurso,
             $especialidadId,
             $modalidadTurno,
             $esFindeOFiesta,
@@ -1777,7 +1916,10 @@ class GuardiaGeneratorService
             $mId = (int) $medico->id;
             foreach ($fechas as $fecha) {
                 $fechaStr = $fecha->format('Y-m-d');
-                $tipoTurno = $esFindeOFiesta($fecha) ? 'festivo_24h' : 'diaria_17h';
+                $es24Dia = $esFindeOFiesta($fecha);
+                $tipoTurno = $es24Dia ? 'festivo_24h' : 'diaria_17h';
+                $semKey = $fecha->format('o-\WW');
+                $horasSemanalesEnCurso[$mId][$semKey] = ($horasSemanalesEnCurso[$mId][$semKey] ?? 0) + ($es24Dia ? 24 : 17);
                 $guardiasAInsertar[] = [
                     'especialidad_id' => $especialidadId,
                     'user_id' => $mId,
@@ -2027,29 +2169,6 @@ class GuardiaGeneratorService
         $excedeTopePorMedico = array_fill_keys($idsGrupo, false);
         /** @var array<int, array<string, int>> $horasSemanalesPorMedico */
         $horasSemanalesPorMedico = [];
-        /** @var array<int, array<string, int>> $horasSemanaIsoMesAnterior */
-        $horasSemanaIsoMesAnterior = [];
-
-        $inicioSemanaPrimerDiaMes = $inicioMes->copy()->startOfWeek(Carbon::MONDAY);
-        if ($inicioSemanaPrimerDiaMes->lt($inicioMes)) {
-            $mapaFestivosMesAnt = (int) $inicioSemanaPrimerDiaMes->year === $anio
-                ? $mapaFestivosAnio
-                : $this->obtenerMapaFestivos($especialidadId, (int) $inicioSemanaPrimerDiaMes->year);
-
-            $guardiasSemanaIsoAnt = Guardia::where('especialidad_id', $especialidadId)
-                ->whereIn('user_id', $idsGrupo)
-                ->whereDate('fecha', '>=', $inicioSemanaPrimerDiaMes->toDateString())
-                ->whereDate('fecha', '<', $inicioMes->toDateString())
-                ->get();
-
-            foreach ($guardiasSemanaIsoAnt as $gaAnt) {
-                $uIdAnt = (int) $gaAnt->user_id;
-                $infoAnt = $this->clasificarTipologiaGuardia($gaAnt, $mapaFestivosMesAnt);
-                $semKeyAnt = Carbon::parse($gaAnt->fecha)->format('o-\WW');
-                $horasSemanaIsoMesAnterior[$uIdAnt][$semKeyAnt] = ($horasSemanaIsoMesAnterior[$uIdAnt][$semKeyAnt] ?? 0)
-                    + (int) $infoAnt['horas_efectivas_computo'];
-            }
-        }
 
         foreach ($guardiasSimuladas as $gs) {
             $uId = (int) $gs['user_id'];

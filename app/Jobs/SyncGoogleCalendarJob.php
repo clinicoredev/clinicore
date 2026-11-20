@@ -6,13 +6,21 @@ use App\Models\Guardia;
 use App\Models\User;
 use App\Services\GuardiaGeneratorService;
 use Carbon\Carbon;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 
-class SyncGoogleCalendarJob implements ShouldQueue
+class SyncGoogleCalendarJob implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
+
+    public int $tries = 3;
+
+    /** @var array<int, int> */
+    public array $backoff = [30, 120, 300];
+
+    public int $uniqueFor = 30;
 
     /**
      * @param array<int, int> $userIds
@@ -25,6 +33,22 @@ class SyncGoogleCalendarJob implements ShouldQueue
         public readonly ?int $anio = null,
         public readonly array $deletedGuardiaIds = []
     ) {}
+
+    public function uniqueId(): string
+    {
+        $uIds = $this->userIds;
+        sort($uIds);
+        $dIds = $this->deletedGuardiaIds;
+        sort($dIds);
+
+        return implode(':', [
+            'gcal',
+            (string) $this->especialidadId,
+            (string) ($this->mes ?? 'all'),
+            (string) ($this->anio ?? 'all'),
+            md5(json_encode([$uIds, $dIds]) ?: ''),
+        ]);
+    }
 
     public function handle(GuardiaGeneratorService $generatorService): void
     {

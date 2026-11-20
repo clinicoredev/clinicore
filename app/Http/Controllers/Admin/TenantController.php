@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\InvitacionSaaS;
 use App\Models\Hospital;
 use App\Models\Especialidad;
+use App\Models\SolicitudPermuta;
 use App\Models\User;
 use App\Models\Guardia;
 use App\Models\LimitacionGuardia;
@@ -80,13 +81,13 @@ class TenantController extends Controller
         $rolInicial = (string) ($data['jefe_rol'] ?? 'Jefe de Servicio');
         $enviarInvitacion = $request->boolean('enviar_invitacion', true);
 
-        [$jefe, $passwordTemporal] = DB::transaction(function () use ($data, $rolInicial): array {
+        [$jefe, $passwordTemporal] = DB::transaction(function () use ($data, $rolInicial, $enviarInvitacion): array {
             $hospital = Hospital::create(['nombre' => $data['hospital_nombre']]);
 
             $especialidad = Especialidad::create([
                 'hospital_id' => $hospital->id,
                 'nombre' => $data['especialidad_nombre'],
-                'codigo' => strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $data['especialidad_nombre']), 0, 3)) . '-' . rand(100, 999),
+                'codigo' => strtoupper(substr((string) preg_replace('/[^a-zA-Z]/', '', $data['especialidad_nombre']), 0, 3)) . '-' . rand(100, 999),
                 'limite_usuarios' => $data['limite_usuarios'] ?? 15,
             ]);
 
@@ -97,7 +98,7 @@ class TenantController extends Controller
                 'email' => $data['jefe_email'],
                 'password' => Hash::make($passwordTemporal),
                 'especialidad_id' => $especialidad->id,
-                'email_verified_at' => now(),
+                'email_verified_at' => $enviarInvitacion ? null : now(),
                 'calendar_token' => Str::random(40),
             ]);
 
@@ -116,6 +117,8 @@ class TenantController extends Controller
                     'mensaje' => "Unidad operativa lista ({$rolInicial}). Se ha enviado el enlace de activación a {$data['jefe_email']}.",
                 ]);
             } catch (\Throwable $e) {
+                $jefe->forceFill(['email_verified_at' => now()])->saveQuietly();
+
                 return back()->with('flash_toast', [
                     'tipo' => 'success',
                     'titulo' => 'Tenant Desplegado (sin envío de email)',
@@ -148,6 +151,7 @@ class TenantController extends Controller
             $especialidadesIds = $hospital->especialidades()->pluck('id');
 
             // Limpieza total en cascada de todas las tablas del Tenant
+            SolicitudPermuta::whereIn('especialidad_id', $especialidadesIds)->delete();
             Guardia::whereIn('especialidad_id', $especialidadesIds)->delete();
             LimitacionGuardia::whereIn('especialidad_id', $especialidadesIds)->delete();
             Ausencia::whereIn('especialidad_id', $especialidadesIds)->delete();
@@ -171,7 +175,7 @@ class TenantController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
             'especialidad_id' => 'required|exists:especialidades,id',
-            'role' => 'required|string|exists:roles,name' 
+            'role' => ['required', 'string', 'exists:roles,name', Rule::notIn(['SuperAdmin'])],
         ]);
 
         $especialidad = Especialidad::findOrFail($data['especialidad_id']);
@@ -205,7 +209,7 @@ class TenantController extends Controller
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email,' . $id,
-            'role' => 'required|string|exists:roles,name'
+            'role' => ['required', 'string', 'exists:roles,name', Rule::notIn(['SuperAdmin'])],
         ]);
 
         $user->update([

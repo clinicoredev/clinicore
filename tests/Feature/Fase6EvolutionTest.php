@@ -51,7 +51,13 @@ test('F6-01 y F6-04: SyncGoogleCalendarJob hace upsert (PUT 404 -> POST), DELETE
         'estado' => 'programada',
     ]);
 
-    Http::fake(function (HttpClientRequest $request) use ($guardiaNueva) {
+    $forzar401 = false;
+
+    Http::fake(function (HttpClientRequest $request) use ($guardiaNueva, &$forzar401) {
+        if ($forzar401) {
+            return Http::response(['error' => 'invalid_credentials'], 401);
+        }
+
         $url = $request->url();
         $method = $request->method();
 
@@ -81,9 +87,7 @@ test('F6-01 y F6-04: SyncGoogleCalendarJob hace upsert (PUT 404 -> POST), DELETE
     Http::assertSent(fn(HttpClientRequest $r) => $r->method() === 'POST' && str_ends_with($r->url(), '/calendars/primary/events'));
 
     // Si Google responde 401 Unauthorized, el job desactiva gcal_sync_enabled y limpia tokens
-    Http::fake([
-        'https://www.googleapis.com/calendar/v3/calendars/*' => Http::response(['error' => 'invalid_credentials'], 401),
-    ]);
+    $forzar401 = true;
 
     $jobRevocado = new SyncGoogleCalendarJob($esp->id, [$medico->id], 11, 2026);
     $jobRevocado->handle(app(GuardiaGeneratorService::class));

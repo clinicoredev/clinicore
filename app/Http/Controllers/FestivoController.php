@@ -18,8 +18,11 @@ class FestivoController extends Controller
             ->get()
             ->map(function($f) {
                 $rawDesc = $f->descripcion ?: 'Festivo Oficial';
-                $esEspecial = str_starts_with(strtoupper($rawDesc), '[ESPECIAL]');
-                $limpiaDesc = trim(str_ireplace('[ESPECIAL]', '', $rawDesc)) ?: 'Festivo Especial';
+                $upper = strtoupper($rawDesc);
+                $esEspecial = str_starts_with($upper, '[ESPECIAL]')
+                    || str_contains($upper, '[ESPECIAL]')
+                    || str_contains($upper, '(ESPECIAL)');
+                $limpiaDesc = trim((string) str_ireplace(['[ESPECIAL]', '(ESPECIAL)'], '', $rawDesc)) ?: 'Festivo Especial';
 
                 return [
                     'id' => $f->id,
@@ -66,7 +69,7 @@ class FestivoController extends Controller
             return back()->withErrors(['festivos' => 'Ese día ya está marcado como festivo en tu servicio.']);
         }
 
-        $nombreBase = trim(str_ireplace('[ESPECIAL]', '', $request->descripcion ?: 'Festivo Oficial'));
+        $nombreBase = trim((string) str_ireplace(['[ESPECIAL]', '(ESPECIAL)'], '', $request->descripcion ?: 'Festivo Oficial')) ?: 'Festivo Oficial';
         $descripcionFinal = $request->boolean('es_especial') 
             ? '[ESPECIAL] ' . $nombreBase 
             : $nombreBase;
@@ -120,6 +123,86 @@ class FestivoController extends Controller
         }
 
         return back()->with('success', "Se han importado $insertados festivos (incluyendo especiales) para el año $anio.");
+    }
+
+    public function update(Request $request, Festivo $festivo)
+    {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes']) || (int) $festivo->especialidad_id !== (int) $request->user()->especialidad_id) {
+            abort(403, 'Acceso denegado.');
+        }
+
+        $request->validate([
+            'fecha' => 'required|date',
+            'descripcion' => 'nullable|string|max:85',
+            'es_especial' => 'nullable|boolean',
+        ]);
+
+        $especialidadId = (int) $request->user()->especialidad_id;
+
+        $existe = Festivo::where('especialidad_id', $especialidadId)
+            ->whereDate('fecha', $request->fecha)
+            ->where('id', '!=', $festivo->id)
+            ->exists();
+
+        if ($existe) {
+            return back()->withErrors(['festivos' => 'Ya existe otro festivo registrado en esa fecha.']);
+        }
+
+        $nombreBase = trim((string) str_ireplace(['[ESPECIAL]', '(ESPECIAL)'], '', $request->descripcion ?: 'Festivo Oficial')) ?: 'Festivo Oficial';
+        $descripcionFinal = $request->boolean('es_especial')
+            ? '[ESPECIAL] ' . $nombreBase
+            : $nombreBase;
+
+        $festivo->update([
+            'fecha' => $request->fecha,
+            'descripcion' => $descripcionFinal,
+        ]);
+
+        return back()->with('success', 'Festivo actualizado correctamente.');
+    }
+
+    public function copiarAnio(Request $request)
+    {
+        if (!$request->user()->hasAnyRole(['Jefe de Servicio', 'Tutor de Residentes'])) {
+            abort(403, 'No tienes permisos para gestionar festivos.');
+        }
+
+        $validated = $request->validate([
+            'anio_destino' => 'required|integer|min:2020|max:2100',
+            'anio_origen' => 'nullable|integer|min:2020|max:2100',
+        ]);
+
+        $anioDestino = (int) $validated['anio_destino'];
+        $anioOrigen = (int) ($validated['anio_origen'] ?? ($anioDestino - 1));
+        $especialidadId = (int) $request->user()->especialidad_id;
+
+        $origen = Festivo::where('especialidad_id', $especialidadId)
+            ->whereYear('fecha', $anioOrigen)
+            ->get();
+
+        $insertados = 0;
+        foreach ($origen as $f) {
+            $fechaOrigen = Carbon::parse($f->fecha);
+            if ($fechaOrigen->month === 2 && $fechaOrigen->day === 29 && !Carbon::createFromDate($anioDestino, 1, 1)->isLeapYear()) {
+                continue;
+            }
+            $nuevaFecha = Carbon::createFromDate($anioDestino, $fechaOrigen->month, $fechaOrigen->day)->toDateString();
+
+            $existe = Festivo::where('especialidad_id', $especialidadId)
+                ->whereDate('fecha', $nuevaFecha)
+                ->exists();
+
+            if (!$existe) {
+                Festivo::create([
+                    'especialidad_id' => $especialidadId,
+                    'fecha' => $nuevaFecha,
+                    'descripcion' => $f->descripcion,
+                ]);
+                $insertados++;
+            }
+        }
+
+        return back()->with('success', "Se han copiado {$insertados} festivos de {$anioOrigen} a {$anioDestino}.");
     }
 
     public function destroy(Request $request, Festivo $festivo)

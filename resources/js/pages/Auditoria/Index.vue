@@ -1,37 +1,82 @@
-<script setup>
-import { ref, computed } from 'vue';
-import { Head, Link } from '@inertiajs/vue3';
-import { 
-    ShieldAlert, PlusCircle, Pencil, Trash2, Clock, 
-    Search, Filter, ChevronDown, ChevronUp, ArrowRight, User, Sparkles, Layers
+<script setup lang="ts">
+import { Head, Link, router } from '@inertiajs/vue3';
+import {
+    ArrowRight,
+    ChevronDown,
+    ChevronUp,
+    Clock,
+    Download,
+    Filter,
+    Layers,
+    Pencil,
+    PlusCircle,
+    Search,
+    ShieldAlert,
+    Sparkles,
+    Trash2,
+    User,
 } from '@lucide/vue';
+import { computed, ref } from 'vue';
 
-const props = defineProps({
-    logs: Object,
-    observabilidad: Object,
+const props = defineProps<{
+    logs: {
+        data: Array<Record<string, any>>;
+        links?: Array<Record<string, any>>;
+        next_page_url?: string | null;
+        prev_page_url?: string | null;
+        current_page?: number;
+        last_page?: number;
+    };
+    observabilidad?: Record<string, number>;
+    filtros?: {
+        busqueda?: string;
+        evento?: string;
+        fecha_desde?: string;
+        fecha_hasta?: string;
+    };
+}>();
+
+const busqueda = ref(props.filtros?.busqueda ?? '');
+const filtroEvento = ref(props.filtros?.evento ?? 'todos');
+const fechaDesde = ref(props.filtros?.fecha_desde ?? '');
+const fechaHasta = ref(props.filtros?.fecha_hasta ?? '');
+const detallesAbiertos = ref<Record<number, boolean>>({});
+
+const aplicarFiltrosServidor = () => {
+    router.get(
+        '/auditoria',
+        {
+            busqueda: busqueda.value || undefined,
+            evento: filtroEvento.value !== 'todos' ? filtroEvento.value : undefined,
+            fecha_desde: fechaDesde.value || undefined,
+            fecha_hasta: fechaHasta.value || undefined,
+        },
+        { preserveState: true, preserveScroll: true, replace: true },
+    );
+};
+
+const seleccionarEvento = (evento: string) => {
+    filtroEvento.value = evento;
+    aplicarFiltrosServidor();
+};
+
+const urlExportarCsv = computed(() => {
+    const params = new URLSearchParams();
+    if (busqueda.value) params.set('busqueda', busqueda.value);
+    if (filtroEvento.value !== 'todos') params.set('evento', filtroEvento.value);
+    if (fechaDesde.value) params.set('fecha_desde', fechaDesde.value);
+    if (fechaHasta.value) params.set('fecha_hasta', fechaHasta.value);
+    const qs = params.toString();
+    return qs ? `/auditoria/exportar?${qs}` : '/auditoria/exportar';
 });
 
-const busqueda = ref('');
-const filtroEvento = ref('todos'); // 'todos', 'created', 'updated', 'deleted', 'lotes', 'sync'
-const detallesAbiertos = ref({});
-
-const toggleDetalle = (id) => {
+const toggleDetalle = (id: number) => {
     detallesAbiertos.value[id] = !detallesAbiertos.value[id];
 };
 
-const logsFiltrados = computed(() => {
-    return (props.logs?.data || []).filter(log => {
-        const cumpleEvento = filtroEvento.value === 'todos'
-            || (filtroEvento.value === 'lotes' && (log.evento === 'batch_generated' || log.evento === 'batch_cleared'))
-            || (filtroEvento.value === 'sync' && ['gcal_synced', 'gcal_sync_failed', 'gcal_sync_warning'].includes(log.evento))
-            || log.evento === filtroEvento.value;
-        const texto = `${log.causante} ${log.modelo} ${log.descripcion} ${log.fecha}`.toLowerCase();
-        const cumpleBusqueda = !busqueda.value || texto.includes(busqueda.value.toLowerCase());
-        return cumpleEvento && cumpleBusqueda;
-    });
-});
+const logsFiltrados = computed(() => props.logs?.data || []);
 
-const obtenerMetaEvento = (evento) => {
+const obtenerMetaEvento = (evento: string) => {
     switch(evento) {
         case 'created': 
             return { 
@@ -94,7 +139,7 @@ const obtenerMetaEvento = (evento) => {
 };
 
 // Extrae pares clave-valor legibles de las propiedades de Spatie Activitylog (attributes / old)
-const tieneCambios = (propiedades) => {
+const tieneCambios = (propiedades: Record<string, any> | null | undefined) => {
     if (!propiedades) return false;
     return Object.keys(propiedades.attributes || propiedades.old || propiedades).length > 0;
 };
@@ -153,36 +198,66 @@ const tieneCambios = (propiedades) => {
         </div>
 
         <!-- BARRA DE BÚSQUEDA Y FILTROS -->
-        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div class="relative w-full sm:w-80">
-                <Search class="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input 
-                    v-model="busqueda" 
-                    type="text" 
-                    placeholder="Buscar por médico, fecha o módulo..." 
-                    class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
-                />
-            </div>
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
+            <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+                <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1">
+                    <div class="relative flex-1 sm:max-w-xs">
+                        <Search class="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                            v-model="busqueda"
+                            @keyup.enter="aplicarFiltrosServidor"
+                            type="text"
+                            placeholder="Buscar por médico, descripción o módulo..."
+                            class="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                        />
+                    </div>
+                    <input
+                        v-model="fechaDesde"
+                        type="date"
+                        class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white font-mono"
+                        title="Fecha desde"
+                    />
+                    <input
+                        v-model="fechaHasta"
+                        type="date"
+                        class="bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white font-mono"
+                        title="Fecha hasta"
+                    />
+                    <button
+                        type="button"
+                        @click="aplicarFiltrosServidor"
+                        class="px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-zinc-950 font-bold text-xs cursor-pointer transition-colors"
+                    >
+                        Filtrar
+                    </button>
+                    <a
+                        :href="urlExportarCsv"
+                        class="px-3.5 py-2 rounded-xl bg-zinc-950 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                        <Download class="w-3.5 h-3.5" /> CSV
+                    </a>
+                </div>
 
-            <div class="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800 w-full sm:w-auto overflow-x-auto">
-                <button @click="filtroEvento = 'todos'" :class="filtroEvento === 'todos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Todos
-                </button>
-                <button @click="filtroEvento = 'created'" :class="filtroEvento === 'created' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Altas
-                </button>
-                <button @click="filtroEvento = 'updated'" :class="filtroEvento === 'updated' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Cambios
-                </button>
-                <button @click="filtroEvento = 'deleted'" :class="filtroEvento === 'deleted' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Bajas
-                </button>
-                <button @click="filtroEvento = 'lotes'" :class="filtroEvento === 'lotes' ? 'bg-teal-500/10 text-teal-300 border border-teal-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Lotes IA
-                </button>
-                <button @click="filtroEvento = 'sync'" :class="filtroEvento === 'sync' ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
-                    Sync GCal
-                </button>
+                <div class="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800 overflow-x-auto">
+                    <button @click="seleccionarEvento('todos')" :class="filtroEvento === 'todos' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Todos
+                    </button>
+                    <button @click="seleccionarEvento('created')" :class="filtroEvento === 'created' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Altas
+                    </button>
+                    <button @click="seleccionarEvento('updated')" :class="filtroEvento === 'updated' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Cambios
+                    </button>
+                    <button @click="seleccionarEvento('deleted')" :class="filtroEvento === 'deleted' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Bajas
+                    </button>
+                    <button @click="seleccionarEvento('lotes')" :class="filtroEvento === 'lotes' ? 'bg-teal-500/10 text-teal-300 border border-teal-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Lotes IA
+                    </button>
+                    <button @click="seleccionarEvento('sync')" :class="filtroEvento === 'sync' ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/20' : 'text-zinc-500 hover:text-zinc-300'" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer">
+                        Sync GCal
+                    </button>
+                </div>
             </div>
         </div>
 

@@ -27,7 +27,9 @@ Route::get('/terminos', fn () => Inertia::render('Legal/Terminos'))->name('legal
 // 1. RUTA PARA SALIR DEL MODO DIOS 
 // (Obligatorio: debe estar FUERA del middleware 'role:SuperAdmin' porque cuando 
 //  suplantas a un Facultativo, dejas de ser SuperAdmin temporalmente).
-Route::post('/impersonate/leave', [TenantController::class, 'leaveImpersonate'])->name('impersonate.leave');
+Route::post('/impersonate/leave', [TenantController::class, 'leaveImpersonate'])
+    ->middleware('auth')
+    ->name('impersonate.leave');
 
 Route::get('/feed/calendario/{token}.ics', [CalendarFeedController::class, 'feed'])->name('calendar.feed');
 
@@ -55,6 +57,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
     Route::get('/calendario-completo', [CalendarioGlobalController::class, 'index'])->name('calendariocompleto.index');
     Route::get('/auditoria', [AuditoriaController::class, 'index'])->name('auditoria.index');
+    Route::get('/auditoria/exportar', [AuditoriaController::class, 'exportarCsv'])->name('auditoria.exportar');
     
     // Directorio de Personal
     Route::get('/personal', [PersonalController::class, 'index'])->name('personal.index');
@@ -103,8 +106,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Gestión global de Festivos del Tenant
     Route::get('/festivos', [FestivoController::class, 'index'])->name('festivos.index');
     Route::post('/festivos', [FestivoController::class, 'store'])->name('festivos.store');
+    Route::patch('/festivos/{festivo}', [FestivoController::class, 'update'])->name('festivos.update');
     Route::delete('/festivos/{festivo}', [FestivoController::class, 'destroy'])->name('festivos.destroy');
     Route::post('/festivos/precargar', [FestivoController::class, 'precargarNacionales'])->name('festivos.precargar');
+    Route::post('/festivos/copiar-anio', [FestivoController::class, 'copiarAnio'])->name('festivos.copiarAnio');
     
     // Operaciones sobre una guardia específica (Comodín al final)
     Route::delete('/guardias/{guardia}', [GuardiaController::class, 'destroy'])->name('guardias.destroy');

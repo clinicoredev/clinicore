@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
+use Spatie\Activitylog\Models\Activity;
 
 class DashboardController extends Controller
 {
@@ -254,6 +255,21 @@ class DashboardController extends Controller
             ];
         }
 
+        $alertaTokenRevocado = null;
+        if (!$user->gcal_sync_enabled && empty($user->gcal_access_token)) {
+            $ultimoFalloGcal = Activity::where('log_name', 'calendario')
+                ->where('event', 'gcal_sync_failed')
+                ->where('causer_type', User::class)
+                ->where('causer_id', $user->id)
+                ->where('created_at', '>=', now()->subDays(14))
+                ->latest()
+                ->first();
+
+            if ($ultimoFalloGcal !== null) {
+                $alertaTokenRevocado = (string) ($ultimoFalloGcal->properties['motivo'] ?? 'Tu vinculación con Google Calendar fue revocada o expiró. Vuelve a vincular tu cuenta.');
+            }
+        }
+
         return Inertia::render('Dashboard', [
             'kpis' => [
                 'total_medicos' => $totalMedicos,
@@ -261,6 +277,12 @@ class DashboardController extends Controller
                 'guardias_mes_servicio' => $guardiasMesServicio,
                 'mis_guardias_mes' => $misGuardiasMes,
                 'ausencias_pendientes' => $totalPendientes,
+            ],
+            'periodo_ytd' => [
+                'anio' => $hoy->year,
+                'desde' => '01/01/' . $hoy->year,
+                'hasta' => '31/12/' . $hoy->year,
+                'etiqueta' => '01/01/' . $hoy->year . ' – 31/12/' . $hoy->year . ' (Año ' . $hoy->year . ')',
             ],
             'desglose_anual' => $desgloseAnual,
             'guardias_hoy' => $guardiasHoyPorColectivo,
@@ -275,6 +297,7 @@ class DashboardController extends Controller
                 'oauth_connected' => !empty($user->gcal_access_token),
                 'oauth_configured' => trim((string) config('services.google.client_id', '')) !== ''
                     && trim((string) config('services.google.client_secret', '')) !== '',
+                'revoked_notice' => $alertaTokenRevocado,
             ],
             'cumplimiento_trimestral_48h' => $cumplimientoTrimestral48h,
             'permisos' => [

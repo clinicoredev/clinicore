@@ -46,6 +46,9 @@ jobs:
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress
 
+      - name: Run ESLint check
+        run: npm run lint:check
+
       - name: Run Vue / TypeScript check
         run: npm run types:check
 

@@ -10,6 +10,7 @@ import {
 
 const props = defineProps({
     kpis: Object,
+    periodo_ytd: Object,
     desglose_anual: Array,
     guardias_hoy: Object,
     guardia_hoy: Object,
@@ -407,10 +408,18 @@ const copiarEnlaceCalendario = async () => {
 
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h3 class="text-lg font-bold text-white flex items-center gap-2">
-                        <Activity class="w-5 h-5 text-emerald-400" />
-                        Transparencia de Equidad (YTD)
-                    </h3>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <Activity class="w-5 h-5 text-emerald-400" />
+                            Transparencia de Equidad (YTD)
+                        </h3>
+                        <span
+                            v-if="periodo_ytd?.etiqueta"
+                            class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-zinc-950 border border-zinc-700 text-zinc-300"
+                        >
+                            Periodo: {{ periodo_ytd.etiqueta }}
+                        </span>
+                    </div>
                     <p class="text-xs text-zinc-400 mt-0.5">
                         Balance estadístico anual diferenciado por colectivo (Adjuntos y Residentes).
                     </p>
@@ -446,9 +455,14 @@ const copiarEnlaceCalendario = async () => {
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
                 <div class="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between">
                     <div>
-                        <span class="block text-[10px] uppercase font-bold text-zinc-500">Tus Guardias Totales</span>
+                        <span class="block text-[10px] uppercase font-bold text-zinc-500">
+                            Tus Guardias Totales <span v-if="periodo_ytd?.anio">({{ periodo_ytd.anio }})</span>
+                        </span>
                         <span class="block text-2xl font-black font-mono text-white mt-1">{{ misEstadisticas.total_guardias }}</span>
-                        <span class="block text-[10px] font-mono text-emerald-400 mt-0.5">{{ misEstadisticas.horas_totales ?? 0 }}h acumuladas</span>
+                        <span class="block text-[10px] font-mono text-emerald-400 mt-0.5">
+                            {{ misEstadisticas.horas_totales ?? 0 }}h acumuladas
+                            <span v-if="periodo_ytd?.desde" class="text-zinc-500">· {{ periodo_ytd.desde }}–{{ periodo_ytd.hasta }}</span>
+                        </span>
                     </div>
                     <div class="p-2 bg-emerald-500/10 rounded-lg"><CalendarDays class="w-5 h-5 text-emerald-400" /></div>
                 </div>
@@ -621,6 +635,16 @@ const copiarEnlaceCalendario = async () => {
                                 v-model="formGcalSync.gcal_sync_enabled"
                                 class="w-4 h-4 rounded border-zinc-700 bg-zinc-900 text-indigo-500"
                             />
+                        </div>
+
+                        <div
+                            v-if="gcal_sync?.revoked_notice"
+                            class="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-[11px] text-amber-200 flex items-start gap-2"
+                        >
+                            <AlertCircle class="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <span>
+                                <strong>Sincronización pausada automáticamente:</strong> {{ gcal_sync.revoked_notice }} Pulsa en <em>Vincular con Google OAuth2</em> para reactivarla.
+                            </span>
                         </div>
 
                         <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-800/80">

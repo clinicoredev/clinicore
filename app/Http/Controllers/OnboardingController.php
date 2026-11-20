@@ -16,6 +16,10 @@ class OnboardingController extends Controller
     {
         $this->validarFirma($request);
 
+        if ($user->email_verified_at !== null) {
+            abort(403, 'Este enlace de activación ya ha sido utilizado.');
+        }
+
         $user->load('especialidad.hospital');
 
         return Inertia::render('auth/EstablecerPassword', [

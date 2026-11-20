@@ -1,26 +1,60 @@
-<script setup>
+<script setup lang="ts">
+import { Head, router, useForm } from '@inertiajs/vue3';
+import { CalendarDays, Copy, PartyPopper, Pencil, ShieldAlert, Sparkles, Star, Trash2, X } from '@lucide/vue';
 import { ref } from 'vue';
-import { Head, useForm, router } from '@inertiajs/vue3';
-import { PartyPopper, Trash2, CalendarDays, ShieldAlert, X, Sparkles, Star } from '@lucide/vue';
 
-const props = defineProps({
-    festivosAgrupados: Object,
-    anioActual: Number,
-    permisos: Object
-});
+interface FestivoRow {
+    id: number;
+    fecha_raw: string;
+    fecha_formateada: string;
+    dia_semana: string;
+    mes: string;
+    anio: number;
+    descripcion: string;
+    es_especial: boolean;
+}
+
+const props = defineProps<{
+    festivosAgrupados: Record<string, FestivoRow[]>;
+    anioActual: number;
+    permisos: {
+        es_admin: boolean;
+    };
+}>();
 
 const anioPrecarga = ref(props.anioActual || new Date().getFullYear());
+const editandoId = ref<number | null>(null);
 
 const form = useForm({
     fecha: '',
     descripcion: '',
-    es_especial: false
+    es_especial: false,
 });
 
+const iniciarEdicion = (fest: FestivoRow) => {
+    editandoId.value = fest.id;
+    form.fecha = fest.fecha_raw;
+    form.descripcion = fest.descripcion;
+    form.es_especial = fest.es_especial;
+};
+
+const cancelarEdicion = () => {
+    editandoId.value = null;
+    form.reset();
+};
+
 const guardarFestivo = () => {
+    if (editandoId.value !== null) {
+        form.patch(`/festivos/${editandoId.value}`, {
+            preserveScroll: true,
+            onSuccess: () => cancelarEdicion(),
+        });
+        return;
+    }
+
     form.post('/festivos', {
         preserveScroll: true,
-        onSuccess: () => form.reset()
+        onSuccess: () => form.reset(),
     });
 };
 
@@ -30,7 +64,14 @@ const importarNacionales = () => {
     }
 };
 
-const borrarFestivo = (id) => {
+const copiarAnioAnterior = () => {
+    const origen = anioPrecarga.value - 1;
+    if (confirm(`¿Copiar los festivos registrados en ${origen} hacia ${anioPrecarga.value} (sin duplicar fechas ya existentes)?`)) {
+        router.post('/festivos/copiar-anio', { anio_origen: origen, anio_destino: anioPrecarga.value }, { preserveScroll: true });
+    }
+};
+
+const borrarFestivo = (id: number) => {
     if (confirm('¿Eliminar este festivo? Afectará a los próximos cálculos de IA.')) {
         router.delete(`/festivos/${id}`, { preserveScroll: true });
     }
@@ -54,7 +95,7 @@ const borrarFestivo = (id) => {
                 </p>
             </div>
 
-            <div v-if="permisos.es_admin" class="flex items-center gap-2 bg-zinc-950/80 p-2 rounded-xl border border-zinc-800 shrink-0">
+            <div v-if="permisos.es_admin" class="flex flex-wrap items-center gap-2 bg-zinc-950/80 p-2 rounded-xl border border-zinc-800 shrink-0">
                 <select v-model="anioPrecarga" class="bg-zinc-900 text-white text-xs font-mono font-bold px-2.5 py-2 rounded-lg border border-zinc-800 outline-none">
                     <option :value="2026">2026</option>
                     <option :value="2027">2027</option>
@@ -62,6 +103,9 @@ const borrarFestivo = (id) => {
                 </select>
                 <button @click="importarNacionales" class="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer">
                     <Sparkles class="w-3.5 h-3.5" /> Precargar Nacionales
+                </button>
+                <button @click="copiarAnioAnterior" class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer">
+                    <Copy class="w-3.5 h-3.5" /> Copiar {{ anioPrecarga - 1 }}
                 </button>
             </div>
         </div>
@@ -73,7 +117,7 @@ const borrarFestivo = (id) => {
                 <span class="font-bold text-rose-400 uppercase text-xs tracking-wider block">Aviso</span>
                 <p class="text-sm font-medium mt-0.5">{{ $page.props.errors.festivos }}</p>
             </div>
-            <button @click="$page.props.errors.festivos = null" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer">
+            <button @click="delete $page.props.errors.festivos" class="ml-auto p-1 hover:bg-rose-500/20 rounded-lg text-rose-400 cursor-pointer">
                 <X class="w-5 h-5"/>
             </button>
         </div>
@@ -83,8 +127,19 @@ const borrarFestivo = (id) => {
             <!-- FORMULARIO DE INGRESO -->
             <div v-if="permisos.es_admin" class="lg:col-span-1">
                 <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-6 sticky top-6">
-                    <h3 class="font-bold text-white mb-4 flex items-center gap-2 text-sm">
-                        <CalendarDays class="w-4 h-4 text-rose-400" /> Registrar Festivo
+                    <h3 class="font-bold text-white mb-4 flex items-center justify-between gap-2 text-sm">
+                        <span class="flex items-center gap-2">
+                            <CalendarDays class="w-4 h-4 text-rose-400" />
+                            {{ editandoId !== null ? 'Editar Festivo' : 'Registrar Festivo' }}
+                        </span>
+                        <button
+                            v-if="editandoId !== null"
+                            type="button"
+                            @click="cancelarEdicion"
+                            class="text-[11px] text-zinc-400 hover:text-white cursor-pointer"
+                        >
+                            Cancelar
+                        </button>
                     </h3>
                     
                     <form @submit.prevent="guardarFestivo" class="space-y-4 text-xs">
@@ -110,7 +165,7 @@ const borrarFestivo = (id) => {
                         </label>
 
                         <button type="submit" :disabled="form.processing" class="w-full py-2.5 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded-lg transition-colors cursor-pointer mt-2 disabled:opacity-50 shadow-lg shadow-rose-500/20">
-                            Añadir al Calendario
+                            {{ editandoId !== null ? 'Guardar Cambios' : 'Añadir al Calendario' }}
                         </button>
                     </form>
                 </div>
@@ -149,9 +204,14 @@ const borrarFestivo = (id) => {
                                     <p class="text-xs font-mono text-zinc-500">{{ fest.dia_semana }}, {{ fest.fecha_formateada }}</p>
                                 </div>
                             </div>
-                            <button v-if="permisos.es_admin" @click="borrarFestivo(fest.id)" class="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all cursor-pointer">
-                                <Trash2 class="w-4 h-4"/>
-                            </button>
+                            <div v-if="permisos.es_admin" class="flex items-center gap-1">
+                                <button @click="iniciarEdicion(fest)" class="text-zinc-500 hover:text-amber-300 hover:bg-amber-500/10 p-2 rounded-lg transition-all cursor-pointer" title="Editar festivo">
+                                    <Pencil class="w-4 h-4"/>
+                                </button>
+                                <button @click="borrarFestivo(fest.id)" class="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-all cursor-pointer" title="Eliminar festivo">
+                                    <Trash2 class="w-4 h-4"/>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
